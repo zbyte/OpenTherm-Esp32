@@ -1,0 +1,12 @@
+menu "Opentherm ESP32-S3 hardware"
+
+# ESP32-S3FH4R2: 4 MB in-package flash, 2 MB quad PSRAM, native USB only.
+# The platform switches below are not user-settable (no prompt), so they are
+# selected here. PSRAM mode (quad vs. octal) lives in sdkconfig.overlay.
+config OPENTHERM_S3FH4R2
+    bool
+    default y
+    select PLATFORM_FLASHSIZE_4M
+    select ENABLE_ESP32S3_USB_JTAG_ONLY
+
+endmenu

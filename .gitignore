@@ -1,0 +1,5 @@
+include/tuya_config_secrets.h
+.build/
+dist/
+.cache/
+.target_logging/
