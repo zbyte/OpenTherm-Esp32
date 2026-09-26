@@ -71,15 +71,22 @@ void status_led_test(void)
     s_test = true;
 }
 
+/* Lights each byte on the wire alone (3 s, then 1 s dark), so the channel
+ * order can be read off the LED regardless of the configured order. */
 static void run_test(void)
 {
-    static const uint8_t rgb[3][3] = {{LEVEL, 0, 0}, {0, LEVEL, 0}, {0, 0, LEVEL}};
-    static const char   *names[3]  = {"red", "green", "blue"};
-    for (int i = 0; i < 3; i++) {
-        PR_NOTICE("status_led: test %s", names[i]);
-        led_port_set(rgb[i][0], rgb[i][1], rgb[i][2]);
-        tal_system_sleep(1000);
+    const uint8_t v = 64;
+    for (int cycle = 0; cycle < 5; cycle++) {
+        for (int i = 0; i < 3; i++) {
+            PR_NOTICE("status_led: test byte %d", i);
+            led_port_set_raw(i == 0 ? v : 0, i == 1 ? v : 0, i == 2 ? v : 0);
+            tal_system_sleep(3000);
+            led_port_set_raw(0, 0, 0);
+            tal_system_sleep(1000);
+        }
+        tal_system_sleep(3000);
     }
+    PR_NOTICE("status_led: test done");
     s_test = false;
 }
 

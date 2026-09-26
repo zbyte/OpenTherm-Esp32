@@ -64,6 +64,7 @@ uint8_t ow_port_read_byte(int gpio);
 /* Board services (hw_port.c) */
 int  led_port_init(int gpio, bool grb); /* single WS2812 via RMT */
 void led_port_set(uint8_t r, uint8_t g, uint8_t b);
+void led_port_set_raw(uint8_t b0, uint8_t b1, uint8_t b2); /* wire order, for tests */
 
 int  wdt_port_watch_self(uint32_t timeout_ms); /* calling task only, reset on miss */
 void wdt_port_feed(void);

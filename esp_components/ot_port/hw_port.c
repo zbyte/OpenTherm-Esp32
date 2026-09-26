@@ -47,10 +47,16 @@ int led_port_init(int gpio, bool grb)
 
 void led_port_set(uint8_t r, uint8_t g, uint8_t b)
 {
+    uint8_t px[3] = {s_led_grb ? g : r, s_led_grb ? r : g, b};
+    led_port_set_raw(px[0], px[1], px[2]);
+}
+
+void led_port_set_raw(uint8_t b0, uint8_t b1, uint8_t b2)
+{
     if (!s_led_chan) {
         return;
     }
-    uint8_t px[3] = {s_led_grb ? g : r, s_led_grb ? r : g, b};
+    uint8_t px[3] = {b0, b1, b2};
     rmt_transmit_config_t tx = {.loop_count = 0};
     rmt_transmit(s_led_chan, s_led_enc, px, sizeof(px), &tx);
     rmt_tx_wait_all_done(s_led_chan, 10); /* the >50 us gap latches it */

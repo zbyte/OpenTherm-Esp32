@@ -17,7 +17,7 @@
 
 void status_led_init(void);
 
-/* CLI: shows red, green, blue for 1 s each (checks the colour order). */
+/* CLI: lights wire byte 0, 1, 2 alone for 3 s each (finds the colour order). */
 void status_led_test(void);
 
 #endif /* STATUS_LED_H_ */
