@@ -15,6 +15,7 @@
 #include "boiler.h"
 #include "clock.h"
 #include "cloud.h"
+#include "ds18b20.h"
 #include "regulator.h"
 #include "sensors.h"
 #include "settings.h"
@@ -61,6 +62,7 @@ static void user_main(void)
     /* Control first: it must run whether or not the cloud ever comes up. */
     clock_init();
     sensors_init();
+    ds18b20_init();
     settings_init(on_settings_change);
     boiler_init();
     regulator_init(on_regulator_change);

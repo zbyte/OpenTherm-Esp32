@@ -50,6 +50,17 @@ int  ot_port_emu_start(ot_port_emu_handler_t handler, uint32_t reply_delay_ms);
 void ot_port_emu_stop(void);
 bool ot_port_emu_running(void);
 
+/*
+ * 1-Wire bit-banging (open drain, external pull-up). Each time slot runs in a
+ * short critical section (<= 70 us, reset 480 us released in between); call
+ * from a task on the network core so OpenTherm timing on the other core is
+ * never disturbed.
+ */
+int     ow_port_init(int gpio);
+bool    ow_port_reset(int gpio); /* true if a presence pulse was seen */
+void    ow_port_write_byte(int gpio, uint8_t byte);
+uint8_t ow_port_read_byte(int gpio);
+
 /* FreeRTOS task pinned to a core (TuyaOpen's thread API has no affinity). */
 typedef void (*ot_port_task_fn_t)(void *arg);
 int ot_port_task_create(ot_port_task_fn_t fn, const char *name, uint32_t stack_bytes, uint32_t priority, int core,

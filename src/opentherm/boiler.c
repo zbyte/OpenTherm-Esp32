@@ -145,6 +145,26 @@ static void poll_cycle(uint32_t n)
 
 static void boiler_task(void *arg)
 {
+    /* Init here, not in boiler_init(): the GPIO ISR service is allocated on
+     * the calling core, and RX edges must be timestamped on the OT core. */
+    ot_port_cfg_t cfg = {
+        .tx_gpio = OT_TX_GPIO,
+        .rx_gpio = OT_RX_GPIO,
+#if defined(OT_TX_ACTIVE_LOW) && OT_TX_ACTIVE_LOW
+        .tx_active_low = true,
+#endif
+#if defined(OT_RX_ACTIVE_LOW) && OT_RX_ACTIVE_LOW
+        .rx_active_low = true,
+#endif
+    };
+    if (ot_port_init(&cfg) != OT_PORT_OK) {
+        PR_ERR("boiler: OpenTherm port init failed");
+        for (;;) {
+            tal_system_sleep(60000);
+        }
+    }
+    PR_NOTICE("boiler: OpenTherm on TX=GPIO%d RX=GPIO%d", cfg.tx_gpio, cfg.rx_gpio);
+
     uint32_t n = 0;
     int64_t  next = ot_port_time_us();
 
@@ -165,22 +185,6 @@ void boiler_init(void)
     tal_mutex_create_init(&s_lock);
     tal_mutex_create_init(&s_bus);
     s_st.tset_x10_cmd = HEAT_FLOW_MIN_X10;
-
-    ot_port_cfg_t cfg = {
-        .tx_gpio = OT_TX_GPIO,
-        .rx_gpio = OT_RX_GPIO,
-#if defined(OT_TX_ACTIVE_LOW) && OT_TX_ACTIVE_LOW
-        .tx_active_low = true,
-#endif
-#if defined(OT_RX_ACTIVE_LOW) && OT_RX_ACTIVE_LOW
-        .rx_active_low = true,
-#endif
-    };
-    if (ot_port_init(&cfg) != OT_PORT_OK) {
-        PR_ERR("boiler: OpenTherm port init failed");
-        return;
-    }
-    PR_NOTICE("boiler: OpenTherm on TX=%d RX=%d", cfg.tx_gpio, cfg.rx_gpio);
 
     if (ot_port_task_create(boiler_task, "ot_master", 4096, OT_TASK_PRIO, OT_CORE, NULL) != OT_PORT_OK) {
         PR_ERR("boiler: task create failed");

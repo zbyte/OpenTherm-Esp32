@@ -7,7 +7,8 @@
 
 #include "tal_api.h"
 
-#define STALE_AFTER_MS (5 * 60 * 1000)
+/* A dead sensor must hand over to the fail-safe flow reasonably quickly. */
+#define STALE_AFTER_MS (2 * 60 * 1000)
 
 typedef struct {
     bool     seen;

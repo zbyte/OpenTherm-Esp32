@@ -303,6 +303,86 @@ bool ot_port_emu_running(void)
     return s_emu_task != NULL;
 }
 
+/* --------------------------------------------------------------- 1-Wire */
+
+static portMUX_TYPE s_ow_mux = portMUX_INITIALIZER_UNLOCKED;
+
+int ow_port_init(int gpio)
+{
+    gpio_config_t c = {
+        .pin_bit_mask = 1ULL << gpio,
+        .mode         = GPIO_MODE_INPUT_OUTPUT_OD,
+        /* The board has 4.7k pull-ups; the weak internal one keeps an
+         * unconnected pin from reading as a bus held low. */
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    if (gpio_config(&c) != ESP_OK) {
+        return OT_PORT_ERR;
+    }
+    gpio_set_level(gpio, 1);
+    return OT_PORT_OK;
+}
+
+bool ow_port_reset(int gpio)
+{
+    gpio_set_level(gpio, 1);
+    esp_rom_delay_us(5);
+    if (gpio_get_level(gpio) == 0) {
+        return false; /* bus stuck low: short or missing pull-up */
+    }
+
+    gpio_set_level(gpio, 0);
+    esp_rom_delay_us(480);
+
+    portENTER_CRITICAL(&s_ow_mux);
+    gpio_set_level(gpio, 1);
+    esp_rom_delay_us(70);
+    bool present = gpio_get_level(gpio) == 0;
+    portEXIT_CRITICAL(&s_ow_mux);
+
+    esp_rom_delay_us(410);
+    return present;
+}
+
+static void ow_write_bit(int gpio, bool bit)
+{
+    portENTER_CRITICAL(&s_ow_mux);
+    gpio_set_level(gpio, 0);
+    esp_rom_delay_us(bit ? 6 : 60);
+    gpio_set_level(gpio, 1);
+    portEXIT_CRITICAL(&s_ow_mux);
+    esp_rom_delay_us(bit ? 64 : 10);
+}
+
+static bool ow_read_bit(int gpio)
+{
+    portENTER_CRITICAL(&s_ow_mux);
+    gpio_set_level(gpio, 0);
+    esp_rom_delay_us(6);
+    gpio_set_level(gpio, 1);
+    esp_rom_delay_us(9);
+    bool bit = gpio_get_level(gpio);
+    portEXIT_CRITICAL(&s_ow_mux);
+    esp_rom_delay_us(55);
+    return bit;
+}
+
+void ow_port_write_byte(int gpio, uint8_t byte)
+{
+    for (int i = 0; i < 8; i++) {
+        ow_write_bit(gpio, (byte >> i) & 1u);
+    }
+}
+
+uint8_t ow_port_read_byte(int gpio)
+{
+    uint8_t v = 0;
+    for (int i = 0; i < 8; i++) {
+        v |= (uint8_t)(ow_read_bit(gpio) << i);
+    }
+    return v;
+}
+
 /* -------------------------------------------------------------- helpers */
 
 int ot_port_task_create(ot_port_task_fn_t fn, const char *name, uint32_t stack_bytes, uint32_t priority, int core,

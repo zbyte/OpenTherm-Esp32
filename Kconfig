@@ -9,22 +9,35 @@ config OPENTHERM_S3FH4R2
     select PLATFORM_FLASHSIZE_4M
     select ENABLE_ESP32S3_USB_JTAG_ONLY
 
+# Defaults match the OpenTherm_ESP32S3 adapter board, rev 4 (README.pdf):
+# Ihor Melnyk adapter on PC817s, 2x DS18B20 on separate pins, BMP180 on I2C.
 # Avoid strapping pins 0/3/45/46, USB 19/20 and flash/PSRAM 26-32.
 config OT_TX_GPIO
     int "OpenTherm adapter TX (to boiler) GPIO"
     range 1 48
-    default 4
+    default 13
 
 config OT_RX_GPIO
     int "OpenTherm adapter RX (from boiler) GPIO"
     range 1 48
-    default 5
+    default 12
+
+config DS18B20_1_GPIO
+    int "DS18B20 #1 (terminal J2) GPIO, -1 = none"
+    range -1 48
+    default 10
+
+config DS18B20_2_GPIO
+    int "DS18B20 #2 (terminal J3) GPIO, -1 = none"
+    range -1 48
+    default 11
 
 config OT_TX_ACTIVE_LOW
     bool "TX pin is LOW when the OpenTherm line is active"
     default y
     ---help---
         ihormelnyk-style adapters: TX idle = HIGH, active = LOW.
+        Board rev 4: GPIO13 = 1 opens U1 and pulls the line to ~6-7 V.
 
 config OT_RX_ACTIVE_LOW
     bool "RX pin is LOW when the OpenTherm line is active"

@@ -18,6 +18,8 @@
 #include "boiler_emu.h"
 #include "clock.h"
 #include "cloud.h"
+#include "ds18b20.h"
+#include "tuya_kconfig.h"
 #include "ot_frame.h"
 #include "regulator.h"
 #include "sensors.h"
@@ -188,6 +190,7 @@ static void cmd_sensor(int argc, char *argv[])
         bool    ok = sensors_get(i, &v);
         PR_NOTICE("sensor %d: %s%d", i + 1, ok ? "" : "stale/none ", ok ? v : 0);
     }
+    ds18b20_print();
     PR_INFO("usage: sensor | sensor <1-4> <degC> | sensor sel <1-4|min|avg>");
 }
 
@@ -211,6 +214,14 @@ static void cmd_ot(int argc, char *argv[])
 static void cmd_sim(int argc, char *argv[])
 {
     if (argc >= 2 && !strcmp(argv[1], "start")) {
+        /* The emulator drives the OT RX pin as an output. On an assembled
+         * adapter board that pin is driven by optocoupler U2 via 100 ohm. */
+        if (argc != 3 || strcmp(argv[2], "bare")) {
+            PR_WARN("sim drives GPIO%d as an output: only on a bare module, NOT on the adapter board.",
+                    OT_RX_GPIO);
+            PR_WARN("confirm with: sim start bare");
+            return;
+        }
         boiler_emu_start();
     } else if (argc >= 2 && !strcmp(argv[1], "stop")) {
         boiler_emu_stop();
@@ -225,7 +236,7 @@ static void cmd_sim(int argc, char *argv[])
     } else if (argc == 3 && !strcmp(argv[1], "room")) {
         boiler_emu_set_room(parse_x10(argv[2]));
     } else if (argc != 1) {
-        PR_INFO("usage: sim [start|stop|speed N|fault <oem code, 0=clear>|mute on|off|out <degC>|room <degC>]");
+        PR_INFO("usage: sim [start bare|stop|speed N|fault <oem code, 0=clear>|mute on|off|out <degC>|room <degC>]");
         return;
     }
     boiler_emu_print();
