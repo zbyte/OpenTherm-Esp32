@@ -32,6 +32,23 @@ config DS18B20_2_GPIO
     range -1 48
     default 11
 
+config BUTTON_GPIO
+    int "Service button GPIO (active low)"
+    range 0 48
+    default 0
+    ---help---
+        BOOT on the SuperMini. GPIO0 is a strapping pin: actions run on
+        release only. For an enclosure prefer a non-strapping pin.
+
+config LED_GPIO
+    int "WS2812 status LED GPIO"
+    range 0 48
+    default 48
+
+config LED_ORDER_GRB
+    bool "Status LED expects GRB byte order (WS2812)"
+    default y
+
 config OT_TX_ACTIVE_LOW
     bool "TX pin is LOW when the OpenTherm line is active"
     default y

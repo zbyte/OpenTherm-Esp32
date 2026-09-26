@@ -21,9 +21,12 @@
 #include "ds18b20.h"
 #include "tuya_kconfig.h"
 #include "ot_frame.h"
+#include "ot_port.h"
 #include "regulator.h"
 #include "sensors.h"
 #include "settings.h"
+#include "status_led.h"
+#include "supervisor.h"
 
 extern void tal_kv_cmd(int argc, char *argv[]);
 extern void netmgr_cmd(int argc, char *argv[]);
@@ -60,6 +63,8 @@ static void cmd_status(int argc, char *argv[])
               b.flow_valid ? "" : "?", b.rel_mod_x10, b.mod_valid ? "" : "?", b.asf_flags, b.oem_fault);
     PR_NOTICE("cloud:    online=%d activated=%d heap=%d", cloud_is_online(),
               tuya_iot_activated(tuya_iot_client_get()), tal_system_get_free_heap_size());
+    PR_NOTICE("system:   uptime=%us reset=%s app=%s", tal_system_get_millisecond() / 1000, sys_port_reset_reason(),
+              sys_port_running_partition());
 }
 
 static void cmd_heat(int argc, char *argv[])
@@ -242,6 +247,26 @@ static void cmd_sim(int argc, char *argv[])
     boiler_emu_print();
 }
 
+static void cmd_led(int argc, char *argv[])
+{
+    status_led_test();
+}
+
+static void cmd_wdt(int argc, char *argv[])
+{
+    if (argc == 3 && !strcmp(argv[1], "stall")) {
+        if (!strcmp(argv[2], "boiler")) {
+            supervisor_simulate_stall(SUP_BOILER);
+            return;
+        }
+        if (!strcmp(argv[2], "regulator")) {
+            supervisor_simulate_stall(SUP_REGULATOR);
+            return;
+        }
+    }
+    PR_INFO("usage: wdt stall <boiler|regulator>  (the board resets ~20 s later)");
+}
+
 static void cmd_unbind(int argc, char *argv[])
 {
     tuya_iot_reset(tuya_iot_client_get());
@@ -263,6 +288,8 @@ static cli_cmd_t s_cli_cmd[] = {
     {.name = "sensor", .func = cmd_sensor, .help = "room sensors"},
     {.name = "ot", .func = cmd_ot, .help = "OpenTherm trace / raw exchange"},
     {.name = "sim", .func = cmd_sim, .help = "boiler emulator on the OpenTherm loopback"},
+    {.name = "led", .func = cmd_led, .help = "LED colour test"},
+    {.name = "wdt", .func = cmd_wdt, .help = "watchdog test"},
     {.name = "unbind", .func = cmd_unbind, .help = "unbind and restart pairing"},
     {.name = "factory", .func = cmd_factory, .help = "reset heating settings to defaults"},
     {.name = "kv", .func = tal_kv_cmd, .help = "kv store"},

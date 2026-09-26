@@ -13,7 +13,10 @@
 #include "tkl_output.h"
 
 #include "boiler.h"
+#include "button.h"
 #include "clock.h"
+#include "status_led.h"
+#include "supervisor.h"
 #include "cloud.h"
 #include "ds18b20.h"
 #include "regulator.h"
@@ -66,6 +69,9 @@ static void user_main(void)
     settings_init(on_settings_change);
     boiler_init();
     regulator_init(on_regulator_change);
+    supervisor_init();
+    button_init();
+    status_led_init();
 
     cloud_init();
     cloud_run();

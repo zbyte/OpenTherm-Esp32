@@ -42,6 +42,14 @@ bool cloud_is_online(void)
     return tuya_iot_is_connected();
 }
 
+cloud_state_e cloud_state(void)
+{
+    if (!tuya_iot_activated(&s_client)) {
+        return CLOUD_PAIRING;
+    }
+    return cloud_is_online() ? CLOUD_ONLINE : CLOUD_OFFLINE;
+}
+
 static void report_objs(dp_obj_t *dps, uint16_t n)
 {
     if (n && cloud_is_online()) {

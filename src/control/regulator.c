@@ -22,6 +22,7 @@
 #include "ot_port.h"
 #include "sensors.h"
 #include "settings.h"
+#include "supervisor.h"
 
 #define PERIOD_MS 2000
 #define CORE      1
@@ -180,6 +181,7 @@ static void regulator_task(void *arg)
         int64_t now = ot_port_time_us();
         step((now - last) / 1e6f);
         last = now;
+        supervisor_beat(SUP_REGULATOR);
     }
 }
 

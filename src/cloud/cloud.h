@@ -22,4 +22,12 @@ void cloud_report_all(void);
 
 bool cloud_is_online(void);
 
+typedef enum {
+    CLOUD_PAIRING, /* not activated: waiting for BLE pairing */
+    CLOUD_OFFLINE, /* activated, no MQTT connection */
+    CLOUD_ONLINE,
+} cloud_state_e;
+
+cloud_state_e cloud_state(void);
+
 #endif /* CLOUD_H_ */

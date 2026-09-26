@@ -7,5 +7,9 @@ CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 
 CONFIG_SPIRAM_MODE_QUAD=y
 # CONFIG_SPIRAM_MODE_OCT is not set
+# OTA images boot "pending verify"; the supervisor confirms them after 60 s
+# of healthy control, otherwise the bootloader rolls back.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
 # Keep booting if PSRAM init fails: the firmware does not depend on it.
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y

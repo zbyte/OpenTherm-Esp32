@@ -61,6 +61,21 @@ bool    ow_port_reset(int gpio); /* true if a presence pulse was seen */
 void    ow_port_write_byte(int gpio, uint8_t byte);
 uint8_t ow_port_read_byte(int gpio);
 
+/* Board services (hw_port.c) */
+int  led_port_init(int gpio, bool grb); /* single WS2812 via RMT */
+void led_port_set(uint8_t r, uint8_t g, uint8_t b);
+
+int  wdt_port_watch_self(uint32_t timeout_ms); /* calling task only, reset on miss */
+void wdt_port_feed(void);
+
+int  btn_port_init(int gpio); /* input with pull-up, pressed = LOW */
+bool btn_port_pressed(int gpio);
+
+const char *sys_port_reset_reason(void);
+bool        sys_port_ota_pending_verify(void); /* first boot after OTA */
+int         sys_port_ota_mark_valid(void);     /* cancel the pending rollback */
+const char *sys_port_running_partition(void);
+
 /* FreeRTOS task pinned to a core (TuyaOpen's thread API has no affinity). */
 typedef void (*ot_port_task_fn_t)(void *arg);
 int ot_port_task_create(ot_port_task_fn_t fn, const char *name, uint32_t stack_bytes, uint32_t priority, int core,

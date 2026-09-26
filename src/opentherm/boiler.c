@@ -15,6 +15,7 @@
 
 #include "ot_frame.h"
 #include "ot_port.h"
+#include "supervisor.h"
 
 #define CYCLE_MS           1000
 #define RESPONSE_TIMEOUT_MS 800
@@ -170,6 +171,7 @@ static void boiler_task(void *arg)
 
     for (;;) {
         poll_cycle(n++);
+        supervisor_beat(SUP_BOILER);
         next += CYCLE_MS * 1000LL;
         int64_t wait_us = next - ot_port_time_us();
         if (wait_us < 0) {
