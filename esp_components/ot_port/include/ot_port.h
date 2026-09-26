@@ -1,0 +1,64 @@
+/**
+ * @file ot_port.h
+ * @brief OpenTherm physical layer and ESP-IDF helpers (no IDF types exposed).
+ *
+ * Levels are logical: ACTIVE/IDLE. A bit is Manchester coded over 1 ms:
+ * '1' = ACTIVE then IDLE, '0' = IDLE then ACTIVE. A frame is start bit (1),
+ * 32 data bits MSB first, stop bit (1). The *_active_low flags map logical
+ * levels to pin levels for the adapter in use.
+ */
+
+#ifndef OT_PORT_H_
+#define OT_PORT_H_
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum {
+    OT_PORT_OK      = 0,
+    OT_PORT_TIMEOUT = -1, /* no response started in time */
+    OT_PORT_INVALID = -2, /* response started but framing was broken */
+    OT_PORT_BUSY    = -3,
+    OT_PORT_ERR     = -4,
+} ot_port_err_e;
+
+typedef struct {
+    int  tx_gpio;
+    int  rx_gpio;
+    bool tx_active_low;
+    bool rx_active_low;
+} ot_port_cfg_t;
+
+/* Master side: configures pins and the RX edge interrupt. */
+int ot_port_init(const ot_port_cfg_t *cfg);
+
+/* Sends a request frame and waits for the response frame. Blocking. */
+int ot_port_transceive(uint32_t request, uint32_t *response, uint32_t timeout_ms);
+
+/*
+ * Slave emulator on the SAME pads (internal loopback, no wiring): it listens on
+ * the master's TX pad and answers on the master's RX pad. Both pads become
+ * input+output. Never enable with a real adapter attached.
+ * The handler returns the response frame, or 0 to stay silent.
+ */
+typedef uint32_t (*ot_port_emu_handler_t)(uint32_t request);
+int  ot_port_emu_start(ot_port_emu_handler_t handler, uint32_t reply_delay_ms);
+void ot_port_emu_stop(void);
+bool ot_port_emu_running(void);
+
+/* FreeRTOS task pinned to a core (TuyaOpen's thread API has no affinity). */
+typedef void (*ot_port_task_fn_t)(void *arg);
+int ot_port_task_create(ot_port_task_fn_t fn, const char *name, uint32_t stack_bytes, uint32_t priority, int core,
+                        void *arg);
+
+int64_t ot_port_time_us(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* OT_PORT_H_ */

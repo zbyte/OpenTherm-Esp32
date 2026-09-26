@@ -13,6 +13,9 @@ set(APP_INC
     ${APP_PATH}/include
     ${APP_PATH}/src/app
     ${APP_PATH}/src/cloud
+    ${APP_PATH}/src/control
+    ${APP_PATH}/src/opentherm
+    ${APP_PATH}/esp_components/ot_port/include
 )
 
 ########################################

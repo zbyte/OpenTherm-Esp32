@@ -33,7 +33,14 @@ did_reset = not args.reset
 with open(out_path, "ab", buffering=0) as out:
     while time.time() < end:
         try:
-            with serial.Serial(args.port, 115200, timeout=0.2, write_timeout=1) as s:
+            # Set DTR/RTS before opening: on the native USB-Serial/JTAG port the
+            # default open toggles them, which resets the chip.
+            s = serial.Serial(None, 115200, timeout=0.2, write_timeout=1)
+            s.port = args.port
+            s.dtr = False
+            s.rts = False
+            s.open()
+            with s:
                 if not did_reset:
                     did_reset = True
                     s.dtr = False

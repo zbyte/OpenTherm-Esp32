@@ -3,11 +3,14 @@
  * @brief Tuya IoT client: activation, events and DP exchange.
  *
  * Based on apps/tuya_cloud/switch_demo from TuyaOpen. The cloud is a remote
- * control only: DP commands are applied to heating_state, and every change of
- * heating_state (from any source) is reported back.
+ * control only: DP commands go to settings, and every change of settings or
+ * regulator status (from any source) is reported back.
  */
 
 #include "cloud.h"
+
+#include <stdlib.h>
+#include <string.h>
 
 #include "cJSON.h"
 #include "netmgr.h"
@@ -22,11 +25,14 @@
 #endif
 
 #include "dp_ids.h"
-#include "heating_state.h"
+#include "regulator.h"
+#include "settings.h"
 
 #ifndef PROJECT_VERSION
 #define PROJECT_VERSION "1.0.0"
 #endif
+
+#define MAX_DPS 8
 
 static tuya_iot_client_t  s_client;
 static tuya_iot_license_t s_license;
@@ -36,16 +42,83 @@ bool cloud_is_online(void)
     return tuya_iot_is_connected();
 }
 
-void cloud_report_all(void)
+static void report_objs(dp_obj_t *dps, uint16_t n)
+{
+    if (n && cloud_is_online()) {
+        tuya_iot_dp_obj_report(&s_client, NULL, dps, n, 0);
+    }
+}
+
+static void report_schedule(const uint8_t *sched)
 {
     if (!cloud_is_online()) {
         return;
     }
+    dp_raw_t *dp = malloc(sizeof(dp_raw_t) + SCHED_BYTES);
+    if (!dp) {
+        return;
+    }
+    dp->id  = DP_ID_WEEK_PROGRAM;
+    dp->len = SCHED_BYTES;
+    memcpy(dp->data, sched, SCHED_BYTES);
+    tuya_iot_dp_raw_report(&s_client, NULL, dp, 3);
+    free(dp);
+}
 
-    dp_obj_t dps[] = {
-        {.id = DP_ID_SWITCH, .type = PROP_BOOL, .value.dp_bool = heating_get_switch()},
-    };
-    tuya_iot_dp_obj_report(&s_client, NULL, dps, sizeof(dps) / sizeof(dps[0]), 0);
+void cloud_report_settings(uint32_t fields)
+{
+    settings_t c;
+    settings_get(&c);
+
+    dp_obj_t dps[MAX_DPS];
+    uint16_t n = 0;
+    if (fields & SET_F_SWITCH) {
+        dps[n++] = (dp_obj_t){.id = DP_ID_SWITCH, .type = PROP_BOOL, .value.dp_bool = c.sw};
+    }
+    if (fields & SET_F_MODE) {
+        dps[n++] = (dp_obj_t){.id = DP_ID_MODE, .type = PROP_ENUM, .value.dp_enum = c.mode};
+    }
+    if (fields & SET_F_TEMP_SET) {
+        dps[n++] = (dp_obj_t){.id = DP_ID_TEMP_SET, .type = PROP_VALUE, .value.dp_value = c.temp_set_x10};
+    }
+    if (fields & SET_F_UPPER) {
+        dps[n++] = (dp_obj_t){.id = DP_ID_UPPER_TEMP, .type = PROP_VALUE, .value.dp_value = c.upper_x10};
+    }
+    if (fields & SET_F_LOWER) {
+        dps[n++] = (dp_obj_t){.id = DP_ID_LOWER_TEMP, .type = PROP_VALUE, .value.dp_value = c.lower_x10};
+    }
+    report_objs(dps, n);
+
+    if (fields & SET_F_SCHEDULE) {
+        report_schedule(c.schedule);
+    }
+}
+
+void cloud_report_status(uint32_t fields)
+{
+    regulator_status_t st;
+    regulator_get_status(&st);
+
+    dp_obj_t dps[MAX_DPS];
+    uint16_t n = 0;
+    if ((fields & REG_F_ROOM) && st.sensor_ok) {
+        /* temp_current has scale 0: whole degrees, rounded */
+        int v    = st.room_x10 >= 0 ? (st.room_x10 + 5) / 10 : (st.room_x10 - 5) / 10;
+        dps[n++] = (dp_obj_t){.id = DP_ID_TEMP_CURRENT, .type = PROP_VALUE, .value.dp_value = v};
+    }
+    if (fields & REG_F_STATE) {
+        dps[n++] = (dp_obj_t){.id = DP_ID_WORK_STATE, .type = PROP_ENUM, .value.dp_enum = st.work_state};
+    }
+    if (fields & REG_F_FAULTS) {
+        dps[n++] = (dp_obj_t){.id = DP_ID_FAULT, .type = PROP_BITMAP, .value.dp_bitmap = st.faults};
+    }
+    report_objs(dps, n);
+}
+
+void cloud_report_all(void)
+{
+    cloud_report_settings(0xffffffff);
+    cloud_report_status(0xffffffff);
 }
 
 static void handle_dp_obj(dp_obj_recv_t *dpobj)
@@ -56,13 +129,47 @@ static void handle_dp_obj(dp_obj_recv_t *dpobj)
 
         switch (dp->id) {
         case DP_ID_SWITCH:
-            if (dp->type == PROP_BOOL) {
-                heating_set_switch(dp->value.dp_bool, HEATING_SRC_CLOUD);
+            settings_set_switch(dp->value.dp_bool, SETTINGS_SRC_CLOUD);
+            break;
+        case DP_ID_MODE:
+            if (!settings_set_mode((uint8_t)dp->value.dp_enum, SETTINGS_SRC_CLOUD)) {
+                cloud_report_settings(SET_F_MODE); /* bounce back the real value */
+            }
+            break;
+        case DP_ID_TEMP_SET:
+            settings_set_temp_set((int16_t)dp->value.dp_value, SETTINGS_SRC_CLOUD);
+            break;
+        case DP_ID_UPPER_TEMP:
+            if (!settings_set_upper((int16_t)dp->value.dp_value, SETTINGS_SRC_CLOUD)) {
+                cloud_report_settings(SET_F_UPPER);
+            }
+            break;
+        case DP_ID_LOWER_TEMP:
+            if (!settings_set_lower((int16_t)dp->value.dp_value, SETTINGS_SRC_CLOUD)) {
+                cloud_report_settings(SET_F_LOWER);
             }
             break;
         default:
             PR_WARN("dp %d not handled", dp->id);
             break;
+        }
+    }
+}
+
+static void handle_dp_raw(dp_raw_recv_t *dpraw)
+{
+    dp_raw_t *dp = &dpraw->dp;
+
+    /* Keep the raw dump: it is how the schedule layout gets verified. */
+    PR_NOTICE("dp rx id:%d type:RAW len:%d", dp->id, dp->len);
+    for (uint32_t i = 0; i < dp->len; i++) {
+        PR_DEBUG_RAW("%02x%s", dp->data[i], (i % 4 == 3) ? " " : "");
+    }
+    PR_DEBUG_RAW("\r\n");
+
+    if (dp->id == DP_ID_WEEK_PROGRAM) {
+        if (!settings_set_schedule(dp->data, dp->len, SETTINGS_SRC_CLOUD)) {
+            cloud_report_settings(SET_F_SCHEDULE); /* bounce back what we run */
         }
     }
 }
@@ -85,9 +192,13 @@ static void user_event_handler_on(tuya_iot_client_t *client, tuya_event_msg_t *e
         PR_WARN("cloud offline, heating keeps running locally");
         break;
 
+    case TUYA_EVENT_TIMESTAMP_SYNC:
+        PR_NOTICE("time synced from cloud");
+        break;
+
     case TUYA_EVENT_RESET:
         /* Unbinding only drops activation data inside the SDK. Heating settings
-         * live under our own KV keys and are deliberately kept (spec). */
+         * live under our own KV key and are deliberately kept (spec). */
         PR_NOTICE("device reset/unbind, type:%d", event->value.asInteger);
         break;
 
@@ -100,14 +211,9 @@ static void user_event_handler_on(tuya_iot_client_t *client, tuya_event_msg_t *e
         handle_dp_obj(event->value.dpobj);
         break;
 
-    case TUYA_EVENT_DP_RECEIVE_RAW: {
-        dp_raw_t *dp = &event->value.dpraw->dp;
-        PR_DEBUG("dp rx id:%d type:RAW len:%d", dp->id, dp->len);
-        for (uint32_t i = 0; i < dp->len; i++) {
-            PR_DEBUG_RAW("%02x", dp->data[i]);
-        }
-        PR_DEBUG_RAW("\r\n");
-    } break;
+    case TUYA_EVENT_DP_RECEIVE_RAW:
+        handle_dp_raw(event->value.dpraw);
+        break;
 
     case TUYA_EVENT_UPGRADE_NOTIFY:
         PR_INFO("OTA notify received (not handled yet)");

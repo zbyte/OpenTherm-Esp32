@@ -1,6 +1,10 @@
 /**
  * @file tuya_app_main.c
- * @brief Entry point: platform services, heating state, cloud.
+ * @brief Entry point: platform services, settings, control loop, cloud.
+ *
+ * Cores: OpenTherm master and regulator are pinned to core 1 so network
+ * latency on core 0 cannot break protocol timing; the Tuya client runs in
+ * this thread.
  */
 
 #include "cJSON.h"
@@ -8,8 +12,12 @@
 #include "tal_cli.h"
 #include "tkl_output.h"
 
+#include "boiler.h"
+#include "clock.h"
 #include "cloud.h"
-#include "heating_state.h"
+#include "regulator.h"
+#include "sensors.h"
+#include "settings.h"
 
 #ifndef PROJECT_VERSION
 #define PROJECT_VERSION "1.0.0"
@@ -17,10 +25,14 @@
 
 extern void app_cli_init(void);
 
-static void on_heating_change(heating_src_e src)
+static void on_settings_change(uint32_t fields, settings_src_e src)
 {
-    (void)src;
-    cloud_report_all();
+    cloud_report_settings(fields ? fields : 0xffffffff);
+}
+
+static void on_regulator_change(uint32_t fields)
+{
+    cloud_report_status(fields);
 }
 
 static void user_main(void)
@@ -46,7 +58,12 @@ static void user_main(void)
     tal_cli_init();
     app_cli_init();
 
-    heating_state_init(on_heating_change);
+    /* Control first: it must run whether or not the cloud ever comes up. */
+    clock_init();
+    sensors_init();
+    settings_init(on_settings_change);
+    boiler_init();
+    regulator_init(on_regulator_change);
 
     cloud_init();
     cloud_run();
@@ -65,7 +82,7 @@ static void app_thread(void *arg)
 void tuya_app_main(void)
 {
     THREAD_CFG_T cfg = {
-        .stackDepth = 1024 * 4,
+        .stackDepth = 1024 * 6,
         .priority   = THREAD_PRIO_1,
         .thrdname   = "tuya_app_main",
     };
