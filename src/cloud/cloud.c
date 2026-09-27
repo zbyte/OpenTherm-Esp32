@@ -123,10 +123,17 @@ static void do_report_status(uint32_t fields)
     if (fields & REG_F_STATE) {
         dps[n++] = (dp_obj_t){.id = DP_ID_WORK_STATE, .type = PROP_ENUM, .value.dp_enum = st.work_state};
     }
-    if (fields & REG_F_FAULTS) {
-        dps[n++] = (dp_obj_t){.id = DP_ID_FAULT, .type = PROP_BITMAP, .value.dp_bitmap = st.faults};
-    }
     report_objs(dps, n);
+
+    if (fields & REG_F_FAULTS) {
+        /* Not via dp_obj: TuyaOpen's dp_rept_valid_check() requires
+         * type == PROP_BITMAP while dp_type_check() then requires
+         * type == cJSON_Number, so an object bitmap report can never pass
+         * ("bitmap check fail"). The JSON path validates it correctly. */
+        char json[24];
+        snprintf(json, sizeof(json), "{\"%d\":%u}", DP_ID_FAULT, (unsigned)st.faults);
+        tuya_iot_dp_report_json(&s_client, json);
+    }
 }
 
 /*
