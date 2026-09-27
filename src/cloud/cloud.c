@@ -20,6 +20,7 @@
 #include "tuya_config.h"
 #include "tuya_iot.h"
 #include "tuya_iot_dp.h"
+#include "dp_schema.h"
 #if defined(ENABLE_WIFI) && (ENABLE_WIFI == 1)
 #include "netconn_wifi.h"
 #endif
@@ -361,6 +362,95 @@ static bool user_network_check(void)
     return status != NETMGR_LINK_DOWN;
 }
 
+/*
+ * The SDK stores the DP schema it got at activation and never refreshes it,
+ * so DPs added on the platform later are rejected ("DP ID 101 Invalid")
+ * until the device is paired again. Patch the stored schema with the custom
+ * DPs (same definitions as the product model) and rebuild it.
+ */
+static const struct {
+    uint8_t     id;
+    const char *mode;
+    int         min, max, scale;
+} s_custom_dps[] = {
+    {DP_ID_BOILER_SET, "rw", 20, 80, 0},     {DP_ID_FLOW_TEMP, "ro", 0, 100, 0},
+    {DP_ID_TEMP_S1, "ro", -400, 1250, 1},    {DP_ID_TEMP_S2, "ro", -400, 1250, 1},
+    {DP_ID_TEMP_BOARD, "ro", -400, 850, 1},  {DP_ID_PRESSURE, "ro", 300, 1100, 0},
+};
+
+static bool schema_has_dp(cJSON *arr, int id)
+{
+    cJSON *it;
+    cJSON_ArrayForEach(it, arr)
+    {
+        cJSON *jid = cJSON_GetObjectItem(it, "id");
+        if (jid && ((cJSON_IsNumber(jid) && jid->valueint == id) || (cJSON_IsString(jid) && atoi(jid->valuestring) == id))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void schema_add_custom_dps(void)
+{
+    if (!tuya_iot_activated(&s_client)) {
+        return; /* a fresh activation brings the full schema */
+    }
+    const char *sid = s_client.activate.schemaId;
+    uint8_t    *buf = NULL;
+    size_t      len = 0;
+    if (tal_kv_get(sid, &buf, &len) != OPRT_OK) {
+        return;
+    }
+    char *json = tal_malloc(len + 1);
+    if (json) {
+        memcpy(json, buf, len);
+        json[len] = '\0';
+    }
+    tal_kv_free(buf);
+    cJSON *arr = json ? cJSON_Parse(json) : NULL;
+    tal_free(json);
+    if (!cJSON_IsArray(arr)) {
+        cJSON_Delete(arr);
+        return;
+    }
+
+    int added = 0;
+    for (size_t i = 0; i < sizeof(s_custom_dps) / sizeof(s_custom_dps[0]); i++) {
+        if (schema_has_dp(arr, s_custom_dps[i].id)) {
+            continue;
+        }
+        cJSON *dp   = cJSON_CreateObject();
+        cJSON *prop = cJSON_CreateObject();
+        cJSON_AddNumberToObject(dp, "id", s_custom_dps[i].id);
+        cJSON_AddStringToObject(dp, "mode", s_custom_dps[i].mode);
+        cJSON_AddStringToObject(dp, "type", "obj");
+        cJSON_AddStringToObject(prop, "type", "value");
+        cJSON_AddNumberToObject(prop, "min", s_custom_dps[i].min);
+        cJSON_AddNumberToObject(prop, "max", s_custom_dps[i].max);
+        cJSON_AddNumberToObject(prop, "scale", s_custom_dps[i].scale);
+        cJSON_AddNumberToObject(prop, "step", 1);
+        cJSON_AddItemToObject(dp, "property", prop);
+        cJSON_AddItemToArray(arr, dp);
+        added++;
+    }
+
+    if (added) {
+        char *out = cJSON_PrintUnformatted(arr);
+        if (out && tal_kv_set(sid, (const uint8_t *)out, strlen(out)) == OPRT_OK) {
+            dp_schema_delete(s_client.activate.devid);
+            s_client.schema = NULL;
+            if (dp_schema_create(s_client.activate.devid, out, &s_client.schema) == OPRT_OK) {
+                PR_NOTICE("schema: added %d custom DPs", added);
+            } else {
+                PR_ERR("schema: rebuild failed");
+            }
+        }
+        tal_free(out);
+    }
+    cJSON_Delete(arr);
+}
+
 void cloud_init(void)
 {
     int rt;
@@ -384,6 +474,7 @@ void cloud_init(void)
         PR_ERR("tuya_iot_init failed: %d", rt);
         return;
     }
+    schema_add_custom_dps();
 
     netmgr_type_e type = 0;
 #if defined(ENABLE_WIFI) && (ENABLE_WIFI == 1)
