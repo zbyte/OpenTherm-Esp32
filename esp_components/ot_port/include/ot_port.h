@@ -12,6 +12,7 @@
 #define OT_PORT_H_
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -80,6 +81,11 @@ bool        sys_port_ota_pending_verify(void); /* first boot after OTA */
 int         sys_port_ota_mark_valid(void);     /* cancel the pending rollback */
 void        sys_port_ota_rollback(void);       /* reboot into the previous image */
 const char *sys_port_running_partition(void);
+bool        sys_port_sta_ip(char *buf, size_t len); /* Wi-Fi station IPv4, false if none */
+
+/* LAN firmware update (lan_ota.c): HTTP GET /info, POST /ota with header
+ * X-OTA-Token. Refuses to start with a token shorter than 16 chars. */
+int lan_ota_start(const char *token, uint16_t port);
 
 /* FreeRTOS task pinned to a core (TuyaOpen's thread API has no affinity). */
 typedef void (*ot_port_task_fn_t)(void *arg);

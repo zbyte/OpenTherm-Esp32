@@ -61,8 +61,10 @@ static void cmd_status(int argc, char *argv[])
               "oem=%u",
               b.comm_ok, b.comm_errors, b.ch_enable_cmd, b.tset_x10_cmd, b.fault, b.ch_active, b.flame, b.flow_x10,
               b.flow_valid ? "" : "?", b.rel_mod_x10, b.mod_valid ? "" : "?", b.asf_flags, b.oem_fault);
-    PR_NOTICE("cloud:    online=%d activated=%d heap=%d", cloud_is_online(),
-              tuya_iot_activated(tuya_iot_client_get()), tal_system_get_free_heap_size());
+    char ip[16] = "-";
+    sys_port_sta_ip(ip, sizeof(ip));
+    PR_NOTICE("cloud:    online=%d activated=%d ip=%s heap=%d", cloud_is_online(),
+              tuya_iot_activated(tuya_iot_client_get()), ip, tal_system_get_free_heap_size());
     /* SYS_TIME_T is 64-bit here and PR_* has no format checking: cast. */
     PR_NOTICE("system:   uptime=%us reset=%s app=%s last_stall=%s", (unsigned)(tal_system_get_millisecond() / 1000),
               sys_port_reset_reason(), sys_port_running_partition(), supervisor_last_stall());

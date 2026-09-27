@@ -3,3 +3,4 @@ include/tuya_config_secrets.h
 dist/
 .cache/
 .target_logging/
+include/ota_secret.h

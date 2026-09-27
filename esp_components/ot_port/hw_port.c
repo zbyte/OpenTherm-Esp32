@@ -6,8 +6,11 @@
 
 #include "ot_port.h"
 
+#include <stdio.h>
+
 #include "driver/gpio.h"
 #include "driver/rmt_tx.h"
+#include "esp_netif.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_task_wdt.h"
@@ -175,6 +178,17 @@ void sys_port_ota_rollback(void)
 {
     /* returns only if there is no previous image to go back to */
     esp_ota_mark_app_invalid_rollback_and_reboot();
+}
+
+bool sys_port_sta_ip(char *buf, size_t len)
+{
+    esp_netif_t        *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip;
+    if (!sta || esp_netif_get_ip_info(sta, &ip) != ESP_OK || ip.ip.addr == 0) {
+        return false;
+    }
+    snprintf(buf, len, IPSTR, IP2STR(&ip.ip));
+    return true;
 }
 
 const char *sys_port_running_partition(void)
