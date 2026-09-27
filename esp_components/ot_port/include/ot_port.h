@@ -83,6 +83,12 @@ void        sys_port_ota_rollback(void);       /* reboot into the previous image
 const char *sys_port_running_partition(void);
 bool        sys_port_sta_ip(char *buf, size_t len); /* Wi-Fi station IPv4, false if none */
 
+/* I2C master for on-board sensors (i2c_port.c), 100 kHz, one device at a time. */
+int  i2c_port_init(int sda, int scl);
+bool i2c_port_probe(uint8_t addr);
+int  i2c_port_write(uint8_t addr, const uint8_t *data, size_t len);
+int  i2c_port_read_reg(uint8_t addr, uint8_t reg, uint8_t *data, size_t len);
+
 /* LAN firmware update (lan_ota.c): HTTP GET /info, POST /ota with header
  * X-OTA-Token. Refuses to start with a token shorter than 16 chars. */
 int lan_ota_start(const char *token, uint16_t port, const char *version);

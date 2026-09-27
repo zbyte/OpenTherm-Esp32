@@ -24,7 +24,9 @@
 #include "netconn_wifi.h"
 #endif
 
+#include "bmp180.h"
 #include "dp_ids.h"
+#include "sensors.h"
 #include "ot_port.h"
 #include "regulator.h"
 #include "settings.h"
@@ -101,6 +103,10 @@ static void do_report_settings(uint32_t fields)
     if (fields & SET_F_LOWER) {
         dps[n++] = (dp_obj_t){.id = DP_ID_LOWER_TEMP, .type = PROP_VALUE, .value.dp_value = c.lower_x10};
     }
+    if (fields & SET_F_BOILER_SET) {
+        /* scale 0: whole degrees */
+        dps[n++] = (dp_obj_t){.id = DP_ID_BOILER_SET, .type = PROP_VALUE, .value.dp_value = c.boiler_set_x10 / 10};
+    }
     report_objs(dps, n);
 
     if (fields & SET_F_SCHEDULE) {
@@ -119,6 +125,9 @@ static void do_report_status(uint32_t fields)
         /* temp_current has scale 0: whole degrees, rounded */
         int v    = st.room_x10 >= 0 ? (st.room_x10 + 5) / 10 : (st.room_x10 - 5) / 10;
         dps[n++] = (dp_obj_t){.id = DP_ID_TEMP_CURRENT, .type = PROP_VALUE, .value.dp_value = v};
+    }
+    if ((fields & REG_F_FLOW) && st.flow_valid) {
+        dps[n++] = (dp_obj_t){.id = DP_ID_FLOW_TEMP, .type = PROP_VALUE, .value.dp_value = (st.flow_x10 + 5) / 10};
     }
     if (fields & REG_F_STATE) {
         dps[n++] = (dp_obj_t){.id = DP_ID_WORK_STATE, .type = PROP_ENUM, .value.dp_enum = st.work_state};
@@ -161,6 +170,47 @@ void cloud_report_all(void)
     cloud_report_status(0xffffffff);
 }
 
+/* Individual sensors and pressure: sent when they move enough, and at least
+ * every SENSOR_REFRESH_MS so the app never shows a stale value for long. */
+#define SENSOR_CHECK_MS   10000
+#define SENSOR_REFRESH_MS (5 * 60 * 1000)
+
+static void report_sensors(void)
+{
+    static const uint8_t ids[3] = {DP_ID_TEMP_S1, DP_ID_TEMP_S2, DP_ID_TEMP_BOARD};
+    static int32_t       last[4] = {INT32_MIN, INT32_MIN, INT32_MIN, INT32_MIN};
+    static uint32_t      last_check, last_full;
+
+    uint32_t now = tal_system_get_millisecond();
+    if (now - last_check < SENSOR_CHECK_MS) {
+        return;
+    }
+    last_check = now;
+    bool full  = now - last_full >= SENSOR_REFRESH_MS;
+    if (full) {
+        last_full = now;
+    }
+
+    dp_obj_t dps[4];
+    uint16_t n = 0;
+    for (uint8_t i = 0; i < 3; i++) {
+        int16_t v;
+        if (sensors_get(i, &v) && (full || last[i] == INT32_MIN || abs(v - last[i]) >= 2)) {
+            dps[n++] = (dp_obj_t){.id = ids[i], .type = PROP_VALUE, .value.dp_value = v};
+            last[i]  = v;
+        }
+    }
+    int32_t pa;
+    if (bmp180_pressure(&pa)) {
+        int32_t hpa = (pa + 50) / 100;
+        if (full || last[3] == INT32_MIN || abs(hpa - last[3]) >= 1) {
+            dps[n++] = (dp_obj_t){.id = DP_ID_PRESSURE, .type = PROP_VALUE, .value.dp_value = hpa};
+            last[3]  = hpa;
+        }
+    }
+    report_objs(dps, n);
+}
+
 /* Cloud thread only. Pending bits survive while offline. */
 static void flush_reports(void)
 {
@@ -175,6 +225,7 @@ static void flush_reports(void)
     if (r) {
         do_report_status(r);
     }
+    report_sensors();
 }
 
 /* LAN update server, started once the network is up. The token comes from
@@ -215,6 +266,11 @@ static void handle_dp_obj(dp_obj_recv_t *dpobj)
         case DP_ID_UPPER_TEMP:
             if (!settings_set_upper((int16_t)dp->value.dp_value, SETTINGS_SRC_CLOUD)) {
                 cloud_report_settings(SET_F_UPPER);
+            }
+            break;
+        case DP_ID_BOILER_SET:
+            if (!settings_set_boiler_set((int16_t)(dp->value.dp_value * 10), SETTINGS_SRC_CLOUD)) {
+                cloud_report_settings(SET_F_BOILER_SET);
             }
             break;
         case DP_ID_LOWER_TEMP:

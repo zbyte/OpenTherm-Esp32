@@ -61,7 +61,9 @@ bool sensors_get_control(sensor_sel_e sel, int16_t *x10)
     int16_t min = INT16_MAX;
     for (uint8_t i = 0; i < SENSOR_SLOTS; i++) {
         int16_t v;
-        if (sensors_get(i, &v)) {
+        /* slot 3 (on-board BMP180) reads high from the ESP32's heat: never
+         * part of min/avg, only selectable explicitly */
+        if (i != 2 && sensors_get(i, &v)) {
             n++;
             sum += v;
             if (v < min) {

@@ -32,12 +32,15 @@ typedef struct {
     int16_t      integral_x10;
     uint32_t     faults;
     work_state_e work_state;
+    bool         flow_valid;
+    int16_t      flow_x10; /* measured boiler flow temperature */
 } regulator_status_t;
 
 /* fields for the change callback */
 #define REG_F_ROOM   (1u << 0)
 #define REG_F_STATE  (1u << 1)
 #define REG_F_FAULTS (1u << 2)
+#define REG_F_FLOW   (1u << 3) /* boiler flow temperature, whole degrees */
 
 typedef void (*regulator_change_cb_t)(uint32_t fields);
 

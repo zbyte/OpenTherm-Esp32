@@ -3,8 +3,9 @@
  * @brief Weekly program in the week_program_2 layout.
  *
  * 7 days (Monday first) x 4 switch points x 4 bytes:
- * hour, minute, temperature (big-endian, 0.1 degC). A point's temperature
- * holds until the next point, across midnight.
+ * hour, minute, temperature (big-endian, 0.1 degC). The temperature is the
+ * boiler FLOW setpoint (below 20 degC = boiler off) and holds until the next
+ * point, across midnight.
  * Layout per the DP description on the Tuya platform; confirmed on 2026-09-27
  * with a packet from the Smart Life Week Program 2 editor (Sunday = day 7).
  */

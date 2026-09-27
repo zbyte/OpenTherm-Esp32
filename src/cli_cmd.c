@@ -15,6 +15,7 @@
 #include "tuya_iot.h"
 
 #include "boiler.h"
+#include "bmp180.h"
 #include "boiler_emu.h"
 #include "clock.h"
 #include "cloud.h"
@@ -51,8 +52,8 @@ static void cmd_status(int argc, char *argv[])
     uint16_t mn = 0;
     bool     tv = clock_now(&wd, &mn);
 
-    PR_NOTICE("settings: sw=%d mode=%s set=%d range=%d..%d sensor=%d", c.sw, s_modes[c.mode], c.temp_set_x10,
-              c.lower_x10, c.upper_x10, c.control_sensor);
+    PR_NOTICE("settings: sw=%d mode=%s set=%d boiler_set=%d range=%d..%d sensor=%d", c.sw, s_modes[c.mode],
+              c.temp_set_x10, c.boiler_set_x10, c.lower_x10, c.upper_x10, c.control_sensor);
     PR_NOTICE("time:     %s day=%d %02d:%02d", tv ? "valid" : "UNKNOWN", wd + 1, mn / 60, mn % 60);
     PR_NOTICE("control:  room=%d%s target=%d (%s) demand=%d flow_set=%d I=%d faults=0x%x state=%s", r.room_x10,
               r.sensor_ok ? "" : "(NO SENSOR)", r.target_x10, r.target_src ? r.target_src : "-", r.demand,
@@ -86,6 +87,13 @@ static void cmd_set(int argc, char *argv[])
         return;
     }
     settings_set_temp_set(parse_x10(argv[1]), SETTINGS_SRC_LOCAL);
+}
+
+static void cmd_boiler(int argc, char *argv[])
+{
+    if (argc != 2 || !settings_set_boiler_set(parse_x10(argv[1]), SETTINGS_SRC_LOCAL)) {
+        PR_INFO("usage: boiler <flow setpoint 20..80 degC> (used in manual mode)");
+    }
 }
 
 static void cmd_mode(int argc, char *argv[])
@@ -199,6 +207,7 @@ static void cmd_sensor(int argc, char *argv[])
         PR_NOTICE("sensor %d: %s%d", i + 1, ok ? "" : "stale/none ", ok ? v : 0);
     }
     ds18b20_print();
+    bmp180_print();
     PR_INFO("usage: sensor | sensor <1-4> <degC> | sensor sel <1-4|min|avg>");
 }
 
@@ -291,6 +300,7 @@ static cli_cmd_t s_cli_cmd[] = {
     {.name = "heat", .func = cmd_heat, .help = "heat <on|off>"},
     {.name = "set", .func = cmd_set, .help = "set <degC>: room setpoint"},
     {.name = "mode", .func = cmd_mode, .help = "mode <auto|manual|home|leave>"},
+    {.name = "boiler", .func = cmd_boiler, .help = "boiler <degC>: flow setpoint for manual mode"},
     {.name = "limits", .func = cmd_limits, .help = "limits <lower> <upper>"},
     {.name = "sched", .func = cmd_sched, .help = "weekly program"},
     {.name = "time", .func = cmd_time, .help = "time [UTC epoch]"},

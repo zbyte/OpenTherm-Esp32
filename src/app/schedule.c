@@ -5,11 +5,10 @@
 
 #include "schedule.h"
 
-/* The app's week-program editor allows values outside the temp_set range
- * (e.g. 2.0 degC). Accept them; the regulator clamps the target into
- * lower_temp..upper_temp when the point is executed. */
+/* Points are boiler flow setpoints (user's choice); values below 20 degC mean
+ * "boiler off" for that period, so 0..80 degC is accepted. */
 #define TEMP_MIN_X10 0
-#define TEMP_MAX_X10 500
+#define TEMP_MAX_X10 800
 
 static const uint8_t *point(const uint8_t *s, uint8_t day, uint8_t idx)
 {
@@ -35,11 +34,11 @@ void schedule_set_point(uint8_t *s, uint8_t day, uint8_t idx, uint8_t h, uint8_t
 
 void schedule_default(uint8_t *s)
 {
-    /* wake / leave / return / sleep, same every day */
+    /* wake / leave / return / sleep, same every day; boiler flow setpoints */
     static const struct {
         uint8_t h, m;
         int16_t t;
-    } def[SCHED_POINTS] = {{6, 0, 210}, {8, 30, 180}, {17, 0, 210}, {22, 30, 180}};
+    } def[SCHED_POINTS] = {{6, 0, 550}, {8, 30, 400}, {17, 0, 550}, {22, 30, 400}};
 
     for (uint8_t d = 0; d < SCHED_DAYS; d++) {
         for (uint8_t i = 0; i < SCHED_POINTS; i++) {

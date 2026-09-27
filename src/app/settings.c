@@ -5,6 +5,7 @@
 
 #include "settings.h"
 
+#include <stddef.h>
 #include <string.h>
 
 #include "tal_api.h"
@@ -13,7 +14,7 @@
 #include "sensors.h"
 
 #define KV_KEY          "heat_cfg"
-#define SETTINGS_FORMAT 1
+#define SETTINGS_FORMAT 2 /* 2: + boiler_set_x10 */
 
 /* DP ranges from the product model (upper_temp / lower_temp). */
 #define UPPER_MIN 250
@@ -35,12 +36,13 @@ static void set_defaults(settings_t *c)
     memset(c, 0, sizeof(*c));
     /* Before the first pairing the device heats with defaults (spec). */
     c->sw             = true;
-    c->mode           = HEAT_MODE_MANUAL;
+    c->mode           = HEAT_MODE_HOME; /* room at temp_set */
     c->temp_set_x10   = HEAT_DEFAULT_SET_X10;
     c->upper_x10      = UPPER_MAX;
     c->lower_x10      = LOWER_MIN;
     c->control_sensor = SENSOR_SEL_ROOM1;
     schedule_default(c->schedule);
+    c->boiler_set_x10 = 500;
 }
 
 static void save_locked(void)
@@ -58,11 +60,17 @@ static void load(void)
 
     set_defaults(&s_cfg);
     if (OPRT_OK == tal_kv_get(KV_KEY, &buf, &len)) {
-        const stored_t *st = (const stored_t *)buf;
-        if (len == sizeof(stored_t) && st->format == SETTINGS_FORMAT) {
-            s_cfg = st->s;
+        const stored_t *st   = (const stored_t *)buf;
+        size_t          body = len > offsetof(stored_t, s) ? len - offsetof(stored_t, s) : 0;
+        if (st->format >= 1 && st->format <= SETTINGS_FORMAT && body > 0 && body <= sizeof(settings_t)) {
+            /* older formats are a prefix: newer fields keep their defaults */
+            memcpy(&s_cfg, &st->s, body);
+            if (st->format != SETTINGS_FORMAT) {
+                PR_NOTICE("settings: migrated from format %d", st->format);
+            }
         } else {
-            PR_WARN("settings: stored format mismatch, using defaults");
+            PR_WARN("settings: stored format %d/%u bytes not understood, using defaults", st->format,
+                    (unsigned)len);
         }
     }
     if (buf) {
@@ -180,10 +188,21 @@ bool settings_set_control_sensor(uint8_t sel, settings_src_e src)
     return true;
 }
 
+bool settings_set_boiler_set(int16_t x10, settings_src_e src)
+{
+    if (x10 < BOILER_SET_MIN_X10 || x10 > BOILER_SET_MAX_X10) {
+        return false;
+    }
+    UPDATE(SET_F_BOILER_SET, s_cfg.boiler_set_x10 != x10, s_cfg.boiler_set_x10 = x10);
+    PR_NOTICE("settings: boiler_set=%d", x10);
+    return true;
+}
+
 void settings_reset(void)
 {
     settings_src_e src = SETTINGS_SRC_LOCAL;
-    UPDATE(SET_F_SWITCH | SET_F_MODE | SET_F_TEMP_SET | SET_F_UPPER | SET_F_LOWER | SET_F_SCHEDULE | SET_F_SENSOR,
+    UPDATE(SET_F_SWITCH | SET_F_MODE | SET_F_TEMP_SET | SET_F_UPPER | SET_F_LOWER | SET_F_SCHEDULE | SET_F_SENSOR |
+               SET_F_BOILER_SET,
            true, set_defaults(&s_cfg));
     PR_NOTICE("settings: reset to defaults");
 }

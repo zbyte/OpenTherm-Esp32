@@ -32,6 +32,16 @@ config DS18B20_2_GPIO
     range -1 48
     default 11
 
+config I2C_SDA_GPIO
+    int "On-board BMP180 (GY-68) I2C SDA GPIO"
+    range 0 48
+    default 8
+
+config I2C_SCL_GPIO
+    int "On-board BMP180 (GY-68) I2C SCL GPIO"
+    range 0 48
+    default 9
+
 config BUTTON_GPIO
     int "Service button GPIO (active low)"
     range 0 48

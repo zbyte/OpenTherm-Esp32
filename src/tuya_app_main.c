@@ -12,6 +12,7 @@
 #include "tal_cli.h"
 #include "tkl_output.h"
 
+#include "bmp180.h"
 #include "boiler.h"
 #include "button.h"
 #include "clock.h"
@@ -66,6 +67,7 @@ static void user_main(void)
     clock_init();
     sensors_init();
     ds18b20_init();
+    bmp180_init();
     settings_init(on_settings_change);
     boiler_init();
     regulator_init(on_regulator_change);

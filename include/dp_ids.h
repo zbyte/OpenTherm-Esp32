@@ -20,4 +20,12 @@
 #define DP_ID_LOWER_TEMP   16 /* value rw, 5.0..15.0 degC, scale 1 */
 #define DP_ID_WEEK_PROGRAM 28 /* raw rw, week_program_2, see schedule.h */
 
+/* Custom DPs (added by the user on the platform) */
+#define DP_ID_BOILER_SET 101 /* boiler_temp_set: value rw, 20..80 degC, scale 0 */
+#define DP_ID_FLOW_TEMP  102 /* flow_temp: value ro, 0..100 degC, scale 0 */
+#define DP_ID_TEMP_S1    103 /* temp_sensor1: DS18B20 on J2, value ro, -40.0..125.0 degC, scale 1 */
+#define DP_ID_TEMP_S2    104 /* temp_sensor2: DS18B20 on J3, value ro, -40.0..125.0 degC, scale 1 */
+#define DP_ID_TEMP_BOARD 105 /* temp_board: BMP180 on the board, value ro, -40.0..85.0 degC, scale 1 */
+#define DP_ID_PRESSURE   106 /* pressure: BMP180, value ro, 300..1100 hPa, scale 0 */
+
 #endif /* DP_IDS_H_ */
