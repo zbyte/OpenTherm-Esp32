@@ -5,8 +5,8 @@
  * 7 days (Monday first) x 4 switch points x 4 bytes:
  * hour, minute, temperature (big-endian, 0.1 degC). A point's temperature
  * holds until the next point, across midnight.
- * Layout per the DP description on the Tuya platform; TODO confirm against a
- * real packet from the app.
+ * Layout per the DP description on the Tuya platform; confirmed on 2026-09-27
+ * with a packet from the Smart Life Week Program 2 editor (Sunday = day 7).
  */
 
 #ifndef SCHEDULE_H_
