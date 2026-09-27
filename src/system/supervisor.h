@@ -16,6 +16,9 @@ typedef enum {
 void supervisor_init(void);
 void supervisor_beat(sup_task_e task);
 
+/* Which task stalled before the last watchdog reset, or "none". */
+const char *supervisor_last_stall(void);
+
 /* Test hook (CLI): ignore beats from `task` so the watchdog fires. */
 void supervisor_simulate_stall(sup_task_e task);
 

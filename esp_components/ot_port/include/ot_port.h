@@ -73,8 +73,12 @@ int  btn_port_init(int gpio); /* input with pull-up, pressed = LOW */
 bool btn_port_pressed(int gpio);
 
 const char *sys_port_reset_reason(void);
+/* Record kept in RTC memory across resets (not power loss); take clears it. */
+void        sys_port_postmortem_set(uint32_t code, uint32_t uptime_s);
+bool        sys_port_postmortem_take(uint32_t *code, uint32_t *uptime_s);
 bool        sys_port_ota_pending_verify(void); /* first boot after OTA */
 int         sys_port_ota_mark_valid(void);     /* cancel the pending rollback */
+void        sys_port_ota_rollback(void);       /* reboot into the previous image */
 const char *sys_port_running_partition(void);
 
 /* FreeRTOS task pinned to a core (TuyaOpen's thread API has no affinity). */

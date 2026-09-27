@@ -127,20 +127,18 @@ static void rx_arm(rx_ctx_t *rx)
     rx->state = RX_WAIT_START;
 }
 
-/* Waits for a complete frame; a frame already in progress may finish late. */
+/* Waits for a complete frame; a frame already in progress may finish late,
+ * but only once: a lone noise edge leaves the state machine "in a frame"
+ * forever, and waiting on it must not hang the caller. */
 static int rx_wait(rx_ctx_t *rx, uint32_t start_timeout_ms, uint32_t *frame)
 {
-    TickType_t wait = pdMS_TO_TICKS(start_timeout_ms);
-    for (;;) {
-        if (xSemaphoreTake(rx->done, wait) == pdTRUE) {
-            break;
+    if (xSemaphoreTake(rx->done, pdMS_TO_TICKS(start_timeout_ms)) != pdTRUE) {
+        bool in_frame = rx->state == RX_START_BIT || rx->state == RX_BITS;
+        /* a frame lasts 34 ms; allow it to complete, then give up */
+        if (!in_frame || xSemaphoreTake(rx->done, pdMS_TO_TICKS(60)) != pdTRUE) {
+            rx->state = RX_IDLE;
+            return in_frame ? OT_PORT_INVALID : OT_PORT_TIMEOUT;
         }
-        if (rx->state == RX_START_BIT || rx->state == RX_BITS) {
-            wait = pdMS_TO_TICKS(40); /* a frame lasts 34 ms */
-            continue;
-        }
-        rx->state = RX_IDLE;
-        return OT_PORT_TIMEOUT;
     }
 
     rx_state_e st = rx->state;
@@ -203,9 +201,14 @@ int ot_port_init(const ot_port_cfg_t *cfg)
     gpio_config(&out);
     set_active(cfg->tx_gpio, cfg->tx_active_low, false);
 
+    /* Weak pull towards the idle level: an unconnected RX pin (bare module,
+     * unplugged adapter) must not pick up noise edges. The adapter board has
+     * its own 1.5k pull-down (R5), which dominates. */
     gpio_config_t in = {
-        .pin_bit_mask = 1ULL << cfg->rx_gpio,
-        .mode         = GPIO_MODE_INPUT,
+        .pin_bit_mask   = 1ULL << cfg->rx_gpio,
+        .mode           = GPIO_MODE_INPUT,
+        .pull_up_en     = cfg->rx_active_low ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
+        .pull_down_en   = cfg->rx_active_low ? GPIO_PULLDOWN_DISABLE : GPIO_PULLDOWN_ENABLE,
     };
     gpio_config(&in);
 

@@ -55,6 +55,12 @@ static int16_t select_target(const settings_t *cfg, bool time_valid, const char 
         int16_t  t;
         if (time_valid && clock_now(&wd, &minute) && schedule_target(cfg->schedule, wd, minute, &t)) {
             *src = "schedule";
+            if (t < cfg->lower_x10) {
+                t = cfg->lower_x10;
+            }
+            if (t > cfg->upper_x10) {
+                t = cfg->upper_x10;
+            }
             return t;
         }
         *src = "temp_set (no time)";

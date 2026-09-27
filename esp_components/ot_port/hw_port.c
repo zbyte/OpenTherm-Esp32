@@ -103,6 +103,34 @@ bool btn_port_pressed(int gpio)
     return gpio_get_level(gpio) == 0;
 }
 
+/* ---------------------------------------------------------- post-mortem */
+
+/* RTC slow memory, not initialised on boot: survives any reset except a
+ * power loss, so the supervisor can say why the watchdog fired even when the
+ * USB console was not attached at that moment. */
+#define PM_MAGIC 0x504d4f52u /* "PMOR" */
+static RTC_NOINIT_ATTR uint32_t s_pm_magic;
+static RTC_NOINIT_ATTR uint32_t s_pm_code;
+static RTC_NOINIT_ATTR uint32_t s_pm_uptime_s;
+
+void sys_port_postmortem_set(uint32_t code, uint32_t uptime_s)
+{
+    s_pm_code     = code;
+    s_pm_uptime_s = uptime_s;
+    s_pm_magic    = PM_MAGIC;
+}
+
+bool sys_port_postmortem_take(uint32_t *code, uint32_t *uptime_s)
+{
+    if (s_pm_magic != PM_MAGIC) {
+        return false;
+    }
+    *code         = s_pm_code;
+    *uptime_s     = s_pm_uptime_s;
+    s_pm_magic    = 0;
+    return true;
+}
+
 /* -------------------------------------------------------------- system */
 
 const char *sys_port_reset_reason(void)
@@ -141,6 +169,12 @@ bool sys_port_ota_pending_verify(void)
 int sys_port_ota_mark_valid(void)
 {
     return esp_ota_mark_app_valid_cancel_rollback() == ESP_OK ? OT_PORT_OK : OT_PORT_ERR;
+}
+
+void sys_port_ota_rollback(void)
+{
+    /* returns only if there is no previous image to go back to */
+    esp_ota_mark_app_invalid_rollback_and_reboot();
 }
 
 const char *sys_port_running_partition(void)

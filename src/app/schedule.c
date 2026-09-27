@@ -5,8 +5,11 @@
 
 #include "schedule.h"
 
-#define TEMP_MIN_X10 50
-#define TEMP_MAX_X10 350
+/* The app's week-program editor allows values outside the temp_set range
+ * (e.g. 2.0 degC). Accept them; the regulator clamps the target into
+ * lower_temp..upper_temp when the point is executed. */
+#define TEMP_MIN_X10 0
+#define TEMP_MAX_X10 500
 
 static const uint8_t *point(const uint8_t *s, uint8_t day, uint8_t idx)
 {
