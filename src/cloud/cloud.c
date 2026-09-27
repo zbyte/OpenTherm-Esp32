@@ -73,7 +73,7 @@ static void report_schedule(const uint8_t *sched)
     free(dp);
 }
 
-void cloud_report_settings(uint32_t fields)
+static void do_report_settings(uint32_t fields)
 {
     settings_t c;
     settings_get(&c);
@@ -102,7 +102,7 @@ void cloud_report_settings(uint32_t fields)
     }
 }
 
-void cloud_report_status(uint32_t fields)
+static void do_report_status(uint32_t fields)
 {
     regulator_status_t st;
     regulator_get_status(&st);
@@ -123,10 +123,45 @@ void cloud_report_status(uint32_t fields)
     report_objs(dps, n);
 }
 
+/*
+ * Reports are only queued here (any thread) and sent from the cloud thread
+ * in cloud_run(). The SDK client is not thread-safe: reporting from the
+ * regulator or CLI thread while the SDK was tearing down on an unbind from
+ * the app could touch freed state.
+ */
+static volatile uint32_t s_pending_settings;
+static volatile uint32_t s_pending_status;
+
+void cloud_report_settings(uint32_t fields)
+{
+    __atomic_fetch_or(&s_pending_settings, fields, __ATOMIC_SEQ_CST);
+}
+
+void cloud_report_status(uint32_t fields)
+{
+    __atomic_fetch_or(&s_pending_status, fields, __ATOMIC_SEQ_CST);
+}
+
 void cloud_report_all(void)
 {
     cloud_report_settings(0xffffffff);
     cloud_report_status(0xffffffff);
+}
+
+/* Cloud thread only. Pending bits survive while offline. */
+static void flush_reports(void)
+{
+    if (!cloud_is_online()) {
+        return;
+    }
+    uint32_t s = __atomic_exchange_n(&s_pending_settings, 0, __ATOMIC_SEQ_CST);
+    uint32_t r = __atomic_exchange_n(&s_pending_status, 0, __ATOMIC_SEQ_CST);
+    if (s) {
+        do_report_settings(s);
+    }
+    if (r) {
+        do_report_status(r);
+    }
 }
 
 static void handle_dp_obj(dp_obj_recv_t *dpobj)
@@ -280,5 +315,6 @@ void cloud_run(void)
 {
     for (;;) {
         tuya_iot_yield(&s_client);
+        flush_reports();
     }
 }

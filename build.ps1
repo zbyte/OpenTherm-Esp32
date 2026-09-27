@@ -1,13 +1,18 @@
 # Build wrapper: activates TuyaOpen and layers sdkconfig.overlay over the
 # platform defaults (ESP-IDF honours the SDKCONFIG_DEFAULTS env var).
-#   .\build.ps1            build
-#   .\build.ps1 clean      full clean (use after changing Kconfig/overlay)
-#   .\build.ps1 flash COM5 build + flash
-param([string]$Action = "build", [string]$Port = "COM5")
+#   .\build.ps1                build
+#   .\build.ps1 clean          full clean (after changing Kconfig/overlay/app_default.config)
+#   .\build.ps1 flash [COM5]   build + flash (auto reset into the bootloader)
+#   .\build.ps1 flash-manual   flash a board already put into the bootloader by hand
+#                              (hold BOOT, tap RESET, release BOOT); press RESET after
+#   .\build.ps1 log [seconds]  show the device log (no chip reset)
+param([string]$Action = "build", [string]$Port = "COM5", [int]$Seconds = 20)
 
 # No "Stop" here: PowerShell 5.1 turns native stderr (tos.py logs) into errors.
 $Sdk = if ($env:OPEN_SDK_ROOT) { $env:OPEN_SDK_ROOT } else { "$HOME\TuyaOpen" }
 $Project = $PSScriptRoot
+$IdfPython = Join-Path $Sdk "platform\ESP32\.espressif\python_env\idf5.4_py3.12_env\Scripts\python.exe"
+$IdfBuild = Join-Path $Sdk "platform\ESP32\tuya_open_sdk\build"
 
 if (-not $env:VIRTUAL_ENV) {
     Push-Location $Sdk
@@ -19,19 +24,50 @@ $PlatformDefaults = Join-Path $Sdk "platform\ESP32\tuya_open_sdk\sdkconfig.defau
 $env:SDKCONFIG_DEFAULTS = "$PlatformDefaults;$(Join-Path $Project 'sdkconfig.overlay')" -replace '\\', '/'
 
 # tos.py flash (tyutool) drops the native USB-Serial/JTAG link mid-write on this
-# board; esptool from the IDF env with compressed flash_args is reliable.
-function Invoke-Flash {
-    $IdfPython = Join-Path $Sdk "platform\ESP32\.espressif\python_env\idf5.4_py3.12_env\Scripts\python.exe"
-    Push-Location (Join-Path $Sdk "platform\ESP32\tuya_open_sdk\build")
-    & $IdfPython -m esptool --chip esp32s3 -p $Port --before default_reset --after hard_reset write_flash "@flash_args"
+# board; esptool from the IDF env with compressed flash_args is reliable once it
+# has connected. Connecting is the flaky part on Windows: reset the chip through
+# devlog.py first (clean DTR/RTS state), then retry a few times.
+function Invoke-Esptool([string]$Before, [string]$After) {
+    Push-Location $IdfBuild
+    $out = & $IdfPython -m esptool --chip esp32s3 -p $Port --before $Before --after $After write_flash "@flash_args" 2>&1 |
+        ForEach-Object { "$_" }
     Pop-Location
+    $ok = ($out | Select-String "Hash of data verified").Count -eq 4
+    if (-not $ok) { $out | Select-Object -Last 3 | Write-Host }
+    return $ok
+}
+
+function Invoke-Flash {
+    for ($i = 1; $i -le 3; $i++) {
+        & $IdfPython (Join-Path $Project "tools\devlog.py") -p $Port -t 1 --reset | Out-Null
+        Start-Sleep -Seconds 2
+        if (Invoke-Esptool "default_reset" "hard_reset") {
+            Write-Host "flash OK"
+            return 0
+        }
+        Write-Host "flash attempt $i failed"
+    }
+    Write-Host "Could not enter the bootloader automatically. Hold BOOT, tap RESET, release BOOT,"
+    Write-Host "then run: .\build.ps1 flash-manual   (and press RESET when it is done)"
+    return 1
 }
 
 Set-Location $Project
 switch ($Action) {
     "clean" { tos.py clean -f }
     "build" { tos.py build }
-    "flash" { tos.py build; if ($LASTEXITCODE -eq 0) { Invoke-Flash } }
+    "flash" {
+        tos.py build
+        if ($LASTEXITCODE -eq 0) { exit (Invoke-Flash) }
+    }
+    "flash-manual" {
+        if (Invoke-Esptool "no_reset" "no_reset") { Write-Host "flash OK - press RESET"; exit 0 }
+        exit 1
+    }
+    "log" {
+        $f = & $IdfPython (Join-Path $Project "tools\devlog.py") -p $Port -t $Seconds
+        Get-Content $f
+    }
     default { throw "unknown action: $Action" }
 }
 exit $LASTEXITCODE

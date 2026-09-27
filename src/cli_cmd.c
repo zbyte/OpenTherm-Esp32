@@ -268,6 +268,12 @@ static void cmd_wdt(int argc, char *argv[])
     PR_INFO("usage: wdt stall <boiler|regulator>  (the board resets ~20 s later)");
 }
 
+static void cmd_report(int argc, char *argv[])
+{
+    cloud_report_all();
+    PR_NOTICE("report: all DPs queued (sent when online)");
+}
+
 static void cmd_unbind(int argc, char *argv[])
 {
     tuya_iot_reset(tuya_iot_client_get());
@@ -291,6 +297,7 @@ static cli_cmd_t s_cli_cmd[] = {
     {.name = "sim", .func = cmd_sim, .help = "boiler emulator on the OpenTherm loopback"},
     {.name = "led", .func = cmd_led, .help = "LED colour test"},
     {.name = "wdt", .func = cmd_wdt, .help = "watchdog test"},
+    {.name = "report", .func = cmd_report, .help = "report all DPs to the cloud"},
     {.name = "unbind", .func = cmd_unbind, .help = "unbind and restart pairing"},
     {.name = "factory", .func = cmd_factory, .help = "reset heating settings to defaults"},
     {.name = "kv", .func = tal_kv_cmd, .help = "kv store"},
