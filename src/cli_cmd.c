@@ -63,8 +63,9 @@ static void cmd_status(int argc, char *argv[])
               b.flow_valid ? "" : "?", b.rel_mod_x10, b.mod_valid ? "" : "?", b.asf_flags, b.oem_fault);
     PR_NOTICE("cloud:    online=%d activated=%d heap=%d", cloud_is_online(),
               tuya_iot_activated(tuya_iot_client_get()), tal_system_get_free_heap_size());
-    PR_NOTICE("system:   uptime=%us reset=%s app=%s", tal_system_get_millisecond() / 1000, sys_port_reset_reason(),
-              sys_port_running_partition());
+    /* SYS_TIME_T is 64-bit here and PR_* has no format checking: cast. */
+    PR_NOTICE("system:   uptime=%us reset=%s app=%s", (unsigned)(tal_system_get_millisecond() / 1000),
+              sys_port_reset_reason(), sys_port_running_partition());
 }
 
 static void cmd_heat(int argc, char *argv[])
