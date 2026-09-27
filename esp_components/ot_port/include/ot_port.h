@@ -85,7 +85,7 @@ bool        sys_port_sta_ip(char *buf, size_t len); /* Wi-Fi station IPv4, false
 
 /* LAN firmware update (lan_ota.c): HTTP GET /info, POST /ota with header
  * X-OTA-Token. Refuses to start with a token shorter than 16 chars. */
-int lan_ota_start(const char *token, uint16_t port);
+int lan_ota_start(const char *token, uint16_t port, const char *version);
 
 /* FreeRTOS task pinned to a core (TuyaOpen's thread API has no affinity). */
 typedef void (*ot_port_task_fn_t)(void *arg);

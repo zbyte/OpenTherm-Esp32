@@ -12,6 +12,8 @@
 
 #include "ot_port.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_app_desc.h"
@@ -25,6 +27,7 @@
 
 static httpd_handle_t s_server;
 static char           s_token[65];
+static char           s_version[24];
 
 static bool token_ok(httpd_req_t *req)
 {
@@ -45,8 +48,8 @@ static esp_err_t info_get(httpd_req_t *req)
     const esp_app_desc_t   *app = esp_app_get_description();
     const esp_partition_t  *run = esp_ota_get_running_partition();
     char                    buf[160];
-    snprintf(buf, sizeof(buf), "{\"app\":\"%s\",\"version\":\"%s\",\"partition\":\"%s\"}", app->project_name,
-             app->version, run ? run->label : "?");
+    snprintf(buf, sizeof(buf), "{\"app\":\"opentherm_esp32s3\",\"version\":\"%s\",\"idf_app\":\"%s\",\"partition\":\"%s\"}",
+             s_version, app->version, run ? run->label : "?");
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, buf);
 }
@@ -105,7 +108,7 @@ static esp_err_t ota_post(httpd_req_t *req)
     return ESP_OK;
 }
 
-int lan_ota_start(const char *token, uint16_t port)
+int lan_ota_start(const char *token, uint16_t port, const char *version)
 {
     if (s_server) {
         return OT_PORT_OK;
@@ -114,6 +117,7 @@ int lan_ota_start(const char *token, uint16_t port)
         return OT_PORT_ERR; /* refuse to run unprotected */
     }
     strcpy(s_token, token);
+    snprintf(s_version, sizeof(s_version), "%s", version ? version : "?");
 
     httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
     cfg.server_port      = port;

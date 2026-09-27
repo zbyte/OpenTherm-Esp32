@@ -69,8 +69,10 @@ function Get-OtaToken {
 }
 
 function Find-Board {
-    $me = Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp, Manual -ErrorAction SilentlyContinue |
-        Where-Object { $_.IPAddress -notlike "169.254.*" -and $_.IPAddress -ne "127.0.0.1" } | Select-Object -First 1
+    # the interface with the default gateway, not a VPN/tunnel adapter
+    $cfg = Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq "Up" } |
+        Select-Object -First 1
+    $me  = $cfg.IPv4Address | Select-Object -First 1
     if (-not $me) { return $null }
     $prefix = ($me.IPAddress -split '\.')[0..2] -join '.'
     Write-Host "searching $prefix.0/24 for the board (port 8080)..."
@@ -85,7 +87,7 @@ function Find-Board {
         if ($open) {
             try {
                 $info = Invoke-RestMethod -Uri "http://$($x.ip):8080/info" -TimeoutSec 3
-                if ($info.app) { Write-Host "found $($info.app) $($info.version) at $($x.ip)"; return $x.ip }
+                if ($info.app -eq "opentherm_esp32s3") { Write-Host "found $($info.app) $($info.version) at $($x.ip)"; return $x.ip }
             } catch {}
         }
     }

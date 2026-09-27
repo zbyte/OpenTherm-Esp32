@@ -177,7 +177,7 @@ static void lan_ota_enable(void)
 #ifdef OTA_TOKEN
     char ip[16] = "?";
     sys_port_sta_ip(ip, sizeof(ip));
-    if (lan_ota_start(OTA_TOKEN, LAN_OTA_PORT) == OT_PORT_OK) {
+    if (lan_ota_start(OTA_TOKEN, LAN_OTA_PORT, PROJECT_VERSION) == OT_PORT_OK) {
         PR_NOTICE("LAN OTA: http://%s:%d/ota", ip, LAN_OTA_PORT);
     } else {
         PR_ERR("LAN OTA: server start failed");
