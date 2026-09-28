@@ -76,6 +76,10 @@ endmenu
 
 menu "Opentherm heating control"
 
+config BOILER_POWER_W
+    int "Boiler rated power, W (for the energy estimate)"
+    default 18000
+
 config HEAT_FLOW_MIN_X10
     int "Minimum flow setpoint while heating, 0.1 degC"
     default 250

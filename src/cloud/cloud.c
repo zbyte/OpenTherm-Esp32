@@ -27,6 +27,7 @@
 
 #include "bmp180.h"
 #include "dp_ids.h"
+#include "energy.h"
 #include "sensors.h"
 #include "ot_port.h"
 #include "regulator.h"
@@ -210,6 +211,24 @@ static void report_sensors(void)
         }
     }
     report_objs(dps, n);
+
+    /* estimated power on a 100 W change, energy total every minute */
+    static int32_t  last_w = -1;
+    static uint32_t last_kwh = UINT32_MAX, last_e_ms;
+    dp_obj_t        e[2];
+    uint16_t        m = 0;
+    int32_t         w = (int32_t)energy_power_w();
+    if (full || last_w < 0 || abs(w - last_w) >= 100) {
+        e[m++] = (dp_obj_t){.id = DP_ID_WORK_POWER, .type = PROP_VALUE, .value.dp_value = w};
+        last_w = w;
+    }
+    uint32_t ckwh = energy_total_centi_kwh();
+    if (ckwh != last_kwh && (full || last_kwh == UINT32_MAX || now - last_e_ms >= 60000)) {
+        e[m++]    = (dp_obj_t){.id = DP_ID_ELE_TOTAL, .type = PROP_VALUE, .value.dp_value = (int)ckwh};
+        last_kwh  = ckwh;
+        last_e_ms = now;
+    }
+    report_objs(e, m);
 }
 
 /* Cloud thread only. Pending bits survive while offline. */
@@ -376,19 +395,30 @@ static const struct {
     {DP_ID_BOILER_SET, "rw", 20, 80, 0},     {DP_ID_FLOW_TEMP, "ro", 0, 100, 0},
     {DP_ID_TEMP_S1, "ro", -400, 1250, 1},    {DP_ID_TEMP_S2, "ro", -400, 1250, 1},
     {DP_ID_TEMP_BOARD, "ro", -400, 850, 1},  {DP_ID_PRESSURE, "ro", 300, 1100, 0},
+    {DP_ID_ELE_TOTAL, "ro", 0, 99999999, 2},
+    /* standard DP whose range was widened on the platform after activation */
+    {DP_ID_WORK_POWER, "ro", 0, 18000, 0},
 };
 
-static bool schema_has_dp(cJSON *arr, int id)
+static cJSON *schema_find_dp(cJSON *arr, int id)
 {
     cJSON *it;
     cJSON_ArrayForEach(it, arr)
     {
         cJSON *jid = cJSON_GetObjectItem(it, "id");
         if (jid && ((cJSON_IsNumber(jid) && jid->valueint == id) || (cJSON_IsString(jid) && atoi(jid->valuestring) == id))) {
-            return true;
+            return it;
         }
     }
-    return false;
+    return NULL;
+}
+
+static bool prop_matches(cJSON *dp, int min, int max, int scale)
+{
+    cJSON *prop = cJSON_GetObjectItem(dp, "property");
+    cJSON *jmin = cJSON_GetObjectItem(prop, "min"), *jmax = cJSON_GetObjectItem(prop, "max");
+    cJSON *jsc  = cJSON_GetObjectItem(prop, "scale");
+    return jmin && jmax && jsc && jmin->valuedouble == min && jmax->valuedouble == max && jsc->valueint == scale;
 }
 
 static void schema_add_custom_dps(void)
@@ -417,8 +447,14 @@ static void schema_add_custom_dps(void)
 
     int added = 0;
     for (size_t i = 0; i < sizeof(s_custom_dps) / sizeof(s_custom_dps[0]); i++) {
-        if (schema_has_dp(arr, s_custom_dps[i].id)) {
+        cJSON *old = schema_find_dp(arr, s_custom_dps[i].id);
+        if (old && prop_matches(old, s_custom_dps[i].min, s_custom_dps[i].max, s_custom_dps[i].scale)) {
             continue;
+        }
+        if (old) {
+            /* definition changed on the platform: replace it */
+            cJSON_DetachItemViaPointer(arr, old);
+            cJSON_Delete(old);
         }
         cJSON *dp   = cJSON_CreateObject();
         cJSON *prop = cJSON_CreateObject();
@@ -441,7 +477,7 @@ static void schema_add_custom_dps(void)
             dp_schema_delete(s_client.activate.devid);
             s_client.schema = NULL;
             if (dp_schema_create(s_client.activate.devid, out, &s_client.schema) == OPRT_OK) {
-                PR_NOTICE("schema: added %d custom DPs", added);
+                PR_NOTICE("schema: added/updated %d DPs", added);
             } else {
                 PR_ERR("schema: rebuild failed");
             }

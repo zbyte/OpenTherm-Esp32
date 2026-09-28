@@ -94,8 +94,37 @@ function Find-Board {
     return $null
 }
 
+$IpCache = Join-Path (Join-Path $Project ".cache") "board_ip"
+function Get-BoardIp {
+    if (Test-Path $IpCache) {
+        $ip = (Get-Content $IpCache -Raw).Trim()
+        try {
+            $info = Invoke-RestMethod -Uri "http://${ip}:8080/info" -TimeoutSec 3
+            if ($info.app -eq "opentherm_esp32s3") { return $ip }
+        } catch {}
+    }
+    $ip = Find-Board
+    if ($ip) { New-Item -ItemType Directory -Force (Split-Path $IpCache) | Out-Null; Set-Content $IpCache $ip }
+    return $ip
+}
+
+function Invoke-RemoteCmd([string]$Line) {
+    $ip = Get-BoardIp
+    if (-not $ip) { Write-Host "board not found on the LAN"; return 1 }
+    $hdr = @{ "X-OTA-Token" = (Get-OtaToken) }
+    $before = (Invoke-WebRequest -Uri "http://${ip}:8080/log" -Headers $hdr -UseBasicParsing -TimeoutSec 5).Content
+    $r = Invoke-WebRequest -Uri "http://${ip}:8080/cli" -Method Post -Headers $hdr -Body $Line -UseBasicParsing -TimeoutSec 10
+    Start-Sleep -Milliseconds 1500
+    $after = (Invoke-WebRequest -Uri "http://${ip}:8080/log" -Headers $hdr -UseBasicParsing -TimeoutSec 5).Content
+    Write-Host "[$($r.Content)]"
+    # print only what was logged after the command
+    $new = if ($after.Length -gt $before.Length -and $after.StartsWith($before)) { $after.Substring($before.Length) } else { ($after -split "`n" | Select-Object -Last 30) -join "`n" }
+    Write-Host ($new -replace "$([char]27)\[[0-9;]*m", "")
+    return 0
+}
+
 function Invoke-LanOta([string]$Ip) {
-    if (-not $Ip -or $Ip -like "COM*") { $Ip = Find-Board }
+    if (-not $Ip -or $Ip -like "COM*") { $Ip = Get-BoardIp }
     if (-not $Ip) { Write-Host "board not found on the LAN"; return 1 }
     $bin = Join-Path $IdfBuild "tuya_open_sdk.bin"
     Write-Host "uploading $bin to $Ip ..."
@@ -121,6 +150,11 @@ switch ($Action) {
     "ota" {
         tos.py build
         if ($LASTEXITCODE -eq 0) { exit (Invoke-LanOta $Port) }
+    }
+    "cmd" { exit (Invoke-RemoteCmd $Port) }
+    "rlog" {
+        $ip = Get-BoardIp
+        (Invoke-WebRequest -Uri "http://${ip}:8080/log" -Headers @{ "X-OTA-Token" = (Get-OtaToken) } -UseBasicParsing).Content -replace "$([char]27)\[[0-9;]*m", ""
     }
     "log" {
         $f = & $IdfPython (Join-Path $Project "tools\devlog.py") -p $Port -t $Seconds

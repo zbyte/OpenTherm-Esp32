@@ -16,6 +16,9 @@
 #include "boiler.h"
 #include "button.h"
 #include "clock.h"
+#include "energy.h"
+#include "log_ring.h"
+#include "ot_port.h"
 #include "status_led.h"
 #include "supervisor.h"
 #include "cloud.h"
@@ -29,6 +32,7 @@
 #endif
 
 extern void app_cli_init(void);
+extern int  app_cli_exec(const char *line);
 
 static void on_settings_change(uint32_t fields, settings_src_e src)
 {
@@ -46,7 +50,8 @@ static void user_main(void)
     /* Before the log: every log line timestamps itself through the time
      * service, whose mutex this creates. */
     tal_time_service_init();
-    tal_log_init(TAL_LOG_LEVEL_DEBUG, 1024, (TAL_LOG_OUTPUT_CB)tkl_log_output);
+    log_ring_init();
+    tal_log_init(TAL_LOG_LEVEL_DEBUG, 1024, (TAL_LOG_OUTPUT_CB)log_ring_output);
 
     PR_NOTICE("%s %s, TuyaOpen %s, %s/%s", PROJECT_NAME, PROJECT_VERSION, OPEN_VERSION, PLATFORM_CHIP,
               PLATFORM_BOARD);
@@ -62,6 +67,7 @@ static void user_main(void)
 
     tal_cli_init();
     app_cli_init();
+    lan_debug_set_handlers(log_ring_read, app_cli_exec);
 
     /* Control first: it must run whether or not the cloud ever comes up. */
     clock_init();
@@ -69,6 +75,7 @@ static void user_main(void)
     ds18b20_init();
     bmp180_init();
     settings_init(on_settings_change);
+    energy_init();
     boiler_init();
     regulator_init(on_regulator_change);
     supervisor_init();

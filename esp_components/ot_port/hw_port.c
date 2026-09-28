@@ -134,6 +134,26 @@ bool sys_port_postmortem_take(uint32_t *code, uint32_t *uptime_s)
     return true;
 }
 
+/* Energy counter mirror: exact across resets/OTA, lost only on power loss. */
+#define EN_MAGIC 0x454e5247u /* "ENRG" */
+static RTC_NOINIT_ATTR uint32_t s_en_magic;
+static RTC_NOINIT_ATTR uint64_t s_en_wh;
+
+void sys_port_energy_set(uint64_t wh)
+{
+    s_en_wh    = wh;
+    s_en_magic = EN_MAGIC;
+}
+
+bool sys_port_energy_get(uint64_t *wh)
+{
+    if (s_en_magic != EN_MAGIC) {
+        return false;
+    }
+    *wh = s_en_wh;
+    return true;
+}
+
 /* -------------------------------------------------------------- system */
 
 const char *sys_port_reset_reason(void)

@@ -77,6 +77,9 @@ const char *sys_port_reset_reason(void);
 /* Record kept in RTC memory across resets (not power loss); take clears it. */
 void        sys_port_postmortem_set(uint32_t code, uint32_t uptime_s);
 bool        sys_port_postmortem_take(uint32_t *code, uint32_t *uptime_s);
+/* Energy counter kept in RTC memory (survives resets, not power loss). */
+void        sys_port_energy_set(uint64_t wh);
+bool        sys_port_energy_get(uint64_t *wh);
 bool        sys_port_ota_pending_verify(void); /* first boot after OTA */
 int         sys_port_ota_mark_valid(void);     /* cancel the pending rollback */
 void        sys_port_ota_rollback(void);       /* reboot into the previous image */
@@ -92,6 +95,13 @@ int  i2c_port_read_reg(uint8_t addr, uint8_t reg, uint8_t *data, size_t len);
 /* LAN firmware update (lan_ota.c): HTTP GET /info, POST /ota with header
  * X-OTA-Token. Refuses to start with a token shorter than 16 chars. */
 int lan_ota_start(const char *token, uint16_t port, const char *version);
+
+/* Remote debugging on the same server (token-protected):
+ *   GET /log  -> log_cb copies recent log text into buf, returns its length
+ *   POST /cli -> cli_cb runs one console line, returns 0 if it was known */
+typedef size_t (*lan_log_read_cb_t)(char *buf, size_t cap);
+typedef int (*lan_cli_exec_cb_t)(const char *line);
+void lan_debug_set_handlers(lan_log_read_cb_t log_cb, lan_cli_exec_cb_t cli_cb);
 
 /* FreeRTOS task pinned to a core (TuyaOpen's thread API has no affinity). */
 typedef void (*ot_port_task_fn_t)(void *arg);

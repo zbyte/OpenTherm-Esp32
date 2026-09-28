@@ -18,6 +18,7 @@
 #include "bmp180.h"
 #include "boiler_emu.h"
 #include "clock.h"
+#include "energy.h"
 #include "cloud.h"
 #include "ds18b20.h"
 #include "tuya_kconfig.h"
@@ -279,6 +280,15 @@ static void cmd_wdt(int argc, char *argv[])
     PR_INFO("usage: wdt stall <boiler|regulator>  (the board resets ~20 s later)");
 }
 
+static void cmd_energy(int argc, char *argv[])
+{
+    if (argc == 2 && !strcmp(argv[1], "reset")) {
+        energy_reset();
+    }
+    uint32_t c = energy_total_centi_kwh();
+    PR_NOTICE("energy: power=%u W total=%u.%02u kWh (estimate)", energy_power_w(), c / 100, c % 100);
+}
+
 static void cmd_report(int argc, char *argv[])
 {
     cloud_report_all();
@@ -309,12 +319,39 @@ static cli_cmd_t s_cli_cmd[] = {
     {.name = "sim", .func = cmd_sim, .help = "boiler emulator on the OpenTherm loopback"},
     {.name = "led", .func = cmd_led, .help = "LED colour test"},
     {.name = "wdt", .func = cmd_wdt, .help = "watchdog test"},
+    {.name = "energy", .func = cmd_energy, .help = "energy [reset]: estimated power/energy"},
     {.name = "report", .func = cmd_report, .help = "report all DPs to the cloud"},
     {.name = "unbind", .func = cmd_unbind, .help = "unbind and restart pairing"},
     {.name = "factory", .func = cmd_factory, .help = "reset heating settings to defaults"},
     {.name = "kv", .func = tal_kv_cmd, .help = "kv store"},
     {.name = "netmgr", .func = netmgr_cmd, .help = "network manager"},
 };
+
+/* Runs one command line from the LAN debug endpoint (POST /cli) against the
+ * table above. The license commands are deliberately not reachable here. */
+int app_cli_exec(const char *line)
+{
+    char  buf[128];
+    char *argv[8];
+    int   argc = 0;
+    strncpy(buf, line, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = 0;
+    static const char *const sep = " \t\r\n";
+    for (char *tok = strtok(buf, sep); tok && argc < 8; tok = strtok(NULL, sep)) {
+        argv[argc++] = tok;
+    }
+    if (argc == 0) {
+        return -1;
+    }
+    for (size_t i = 0; i < sizeof(s_cli_cmd) / sizeof(s_cli_cmd[0]); i++) {
+        if (!strcmp(argv[0], s_cli_cmd[i].name)) {
+            PR_NOTICE("lan cli> %s", line);
+            s_cli_cmd[i].func(argc, argv);
+            return 0;
+        }
+    }
+    return -1;
+}
 
 void app_cli_init(void)
 {

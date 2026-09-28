@@ -21,6 +21,7 @@
 
 #include "boiler.h"
 #include "clock.h"
+#include "energy.h"
 #include "ot_port.h"
 #include "sensors.h"
 #include "settings.h"
@@ -169,6 +170,7 @@ static void step(float dt_s)
 
     boiler_status_t b;
     boiler_get_status(&b);
+    energy_tick(dt_s, &b);
 
     uint32_t faults = 0;
     if (!sensor_ok) {
