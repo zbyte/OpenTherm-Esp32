@@ -18,6 +18,7 @@
 #include "clock.h"
 #include "energy.h"
 #include "log_ring.h"
+#include "web.h"
 #include "ot_port.h"
 #include "status_led.h"
 #include "supervisor.h"
@@ -68,6 +69,7 @@ static void user_main(void)
     tal_cli_init();
     app_cli_init();
     lan_debug_set_handlers(log_ring_read, app_cli_exec);
+    lan_web_set_handlers(web_page, web_form);
 
     /* Control first: it must run whether or not the cloud ever comes up. */
     clock_init();

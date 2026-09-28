@@ -94,7 +94,13 @@ int  i2c_port_read_reg(uint8_t addr, uint8_t reg, uint8_t *data, size_t len);
 
 /* LAN firmware update (lan_ota.c): HTTP GET /info, POST /ota with header
  * X-OTA-Token. Refuses to start with a token shorter than 16 chars. */
-int lan_ota_start(const char *token, uint16_t port, const char *version);
+int lan_ota_start(const char *token, uint16_t port, const char *version, const char *web_password);
+
+/* Web UI on the same server: GET / renders a page into out (returns its
+ * length); POST /set passes the url-encoded form body, then redirects to /. */
+typedef size_t (*lan_page_cb_t)(char *out, size_t cap);
+typedef void (*lan_form_cb_t)(const char *body);
+void lan_web_set_handlers(lan_page_cb_t page_cb, lan_form_cb_t form_cb);
 
 /* Remote debugging on the same server (token-protected):
  *   GET /log  -> log_cb copies recent log text into buf, returns its length
