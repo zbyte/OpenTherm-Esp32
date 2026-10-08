@@ -17,6 +17,8 @@
 #include "esp_attr.h"
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
+#include "hal/gpio_ll.h"
+#include "soc/gpio_struct.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -308,7 +310,20 @@ bool ot_port_emu_running(void)
 
 /* --------------------------------------------------------------- 1-Wire */
 
+/* Register access from IRAM: gpio_set_level() runs from flash, and a cache
+ * miss inside a slot pushed the read sample past the 15 us the sensor
+ * guarantees to hold a '0'. */
 static portMUX_TYPE s_ow_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static inline void IRAM_ATTR ow_set(int gpio, int level)
+{
+    gpio_ll_set_level(&GPIO, gpio, level);
+}
+
+static inline int IRAM_ATTR ow_get(int gpio)
+{
+    return gpio_ll_get_level(&GPIO, gpio);
+}
 
 int ow_port_init(int gpio)
 {
@@ -326,47 +341,66 @@ int ow_port_init(int gpio)
     return OT_PORT_OK;
 }
 
-bool ow_port_reset(int gpio)
+void ow_port_strong_pullup(int gpio)
 {
     gpio_set_level(gpio, 1);
-    esp_rom_delay_us(5);
-    if (gpio_get_level(gpio) == 0) {
-        return false; /* bus stuck low: short or missing pull-up */
-    }
+    gpio_set_direction(gpio, GPIO_MODE_INPUT_OUTPUT);
+}
 
-    gpio_set_level(gpio, 0);
-    esp_rom_delay_us(480);
+static IRAM_ATTR bool ow_presence(int gpio)
+{
+    bool present = false;
 
     portENTER_CRITICAL(&s_ow_mux);
-    gpio_set_level(gpio, 1);
-    esp_rom_delay_us(70);
-    bool present = gpio_get_level(gpio) == 0;
+    ow_set(gpio, 1);
+    /* the sensor waits 15-60 us, then holds the bus low for 60-240 us */
+    int64_t t0 = esp_timer_get_time();
+    while (esp_timer_get_time() - t0 < 240) {
+        if (!ow_get(gpio)) {
+            present = true;
+            break;
+        }
+    }
     portEXIT_CRITICAL(&s_ow_mux);
-
-    esp_rom_delay_us(410);
     return present;
 }
 
-static void ow_write_bit(int gpio, bool bit)
+ow_reset_e ow_port_reset(int gpio)
 {
-    portENTER_CRITICAL(&s_ow_mux);
-    gpio_set_level(gpio, 0);
-    esp_rom_delay_us(bit ? 6 : 60);
-    gpio_set_level(gpio, 1);
-    portEXIT_CRITICAL(&s_ow_mux);
-    esp_rom_delay_us(bit ? 64 : 10);
+    gpio_set_direction(gpio, GPIO_MODE_INPUT_OUTPUT_OD); /* end strong pull-up */
+    ow_set(gpio, 1);
+    esp_rom_delay_us(5);
+    if (!ow_get(gpio)) {
+        return OW_STUCK_LOW;
+    }
+
+    ow_set(gpio, 0);
+    esp_rom_delay_us(480);
+    bool present = ow_presence(gpio);
+    esp_rom_delay_us(480);
+    return present ? OW_PRESENT : OW_NO_PRESENCE;
 }
 
-static bool ow_read_bit(int gpio)
+static IRAM_ATTR void ow_write_bit(int gpio, bool bit)
 {
     portENTER_CRITICAL(&s_ow_mux);
-    gpio_set_level(gpio, 0);
-    esp_rom_delay_us(6);
-    gpio_set_level(gpio, 1);
-    esp_rom_delay_us(9);
-    bool bit = gpio_get_level(gpio);
+    ow_set(gpio, 0);
+    esp_rom_delay_us(bit ? 5 : 60);
+    ow_set(gpio, 1);
     portEXIT_CRITICAL(&s_ow_mux);
-    esp_rom_delay_us(55);
+    esp_rom_delay_us(bit ? 65 : 10);
+}
+
+bool IRAM_ATTR ow_port_read_bit(int gpio)
+{
+    portENTER_CRITICAL(&s_ow_mux);
+    ow_set(gpio, 0);
+    esp_rom_delay_us(2);
+    ow_set(gpio, 1);
+    esp_rom_delay_us(8); /* sample ~10 us after the falling edge (limit 15) */
+    bool bit = ow_get(gpio);
+    portEXIT_CRITICAL(&s_ow_mux);
+    esp_rom_delay_us(60);
     return bit;
 }
 
@@ -381,7 +415,7 @@ uint8_t ow_port_read_byte(int gpio)
 {
     uint8_t v = 0;
     for (int i = 0; i < 8; i++) {
-        v |= (uint8_t)(ow_read_bit(gpio) << i);
+        v |= (uint8_t)(ow_port_read_bit(gpio) << i);
     }
     return v;
 }

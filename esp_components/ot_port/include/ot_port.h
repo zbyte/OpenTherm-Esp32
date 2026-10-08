@@ -53,14 +53,24 @@ bool ot_port_emu_running(void);
 
 /*
  * 1-Wire bit-banging (open drain, external pull-up). Each time slot runs in a
- * short critical section (<= 70 us, reset 480 us released in between); call
- * from a task on the network core so OpenTherm timing on the other core is
- * never disturbed.
+ * short critical section from IRAM (<= 70 us; the 480 us reset low is outside
+ * it); call from a task on the network core so OpenTherm timing on the other
+ * core is never disturbed.
  */
-int     ow_port_init(int gpio);
-bool    ow_port_reset(int gpio); /* true if a presence pulse was seen */
-void    ow_port_write_byte(int gpio, uint8_t byte);
-uint8_t ow_port_read_byte(int gpio);
+typedef enum {
+    OW_PRESENT     = 0,
+    OW_NO_PRESENCE = 1, /* nothing answered: absent sensor or broken DQ */
+    OW_STUCK_LOW   = 2, /* bus low before the reset: short or no pull-up */
+} ow_reset_e;
+
+int        ow_port_init(int gpio);
+ow_reset_e ow_port_reset(int gpio);
+void       ow_port_write_byte(int gpio, uint8_t byte);
+uint8_t    ow_port_read_byte(int gpio);
+bool       ow_port_read_bit(int gpio);
+/* Drive DQ high push-pull (parasite-powered sensor converting); the next
+ * reset returns the pin to open drain. */
+void       ow_port_strong_pullup(int gpio);
 
 /* Board services (hw_port.c) */
 int  led_port_init(int gpio, bool grb); /* single WS2812 via RMT */

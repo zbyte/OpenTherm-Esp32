@@ -195,6 +195,12 @@ static void cmd_sensor(int argc, char *argv[])
         }
         return;
     }
+    if (argc == 3 && !strcmp(argv[1], "pull")) {
+        ds18b20_set_pull(!strcmp(argv[2], "on")    ? DS18B20_PULL_ON
+                         : !strcmp(argv[2], "off") ? DS18B20_PULL_OFF
+                                                   : DS18B20_PULL_AUTO);
+        return;
+    }
     if (argc == 3) {
         int slot = atoi(argv[1]);
         if (slot >= 1 && slot <= SENSOR_SLOTS) {
@@ -209,7 +215,7 @@ static void cmd_sensor(int argc, char *argv[])
     }
     ds18b20_print();
     bmp180_print();
-    PR_INFO("usage: sensor | sensor <1-4> <degC> | sensor sel <1-4|min|avg>");
+    PR_INFO("usage: sensor | sensor <1-4> <degC> | sensor sel <1-4|min|avg> | sensor pull <auto|on|off>");
 }
 
 static void cmd_ot(int argc, char *argv[])
