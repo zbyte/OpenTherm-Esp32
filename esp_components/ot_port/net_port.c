@@ -54,7 +54,8 @@ static void mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         s_connected = false;
         break;
     case MQTT_EVENT_DATA:
-        /* Messages are small (RPC requests); a fragmented one is dropped. */
+        /* Messages fit the buffer (firmware chunks are sized for it); a
+         * fragmented one is dropped. */
         if (ev->current_data_offset != 0 || ev->data_len != ev->total_data_len) {
             ESP_LOGW(TAG, "message of %d bytes too large, dropped", ev->total_data_len);
             break;
@@ -138,12 +139,13 @@ int mqtt_port_start(const mqtt_port_cfg_t *cfg)
         .broker.address.uri                     = cfg->uri,
         .broker.verification.crt_bundle_attach = esp_crt_bundle_attach,
         .credentials.username                  = cfg->username,
+        .credentials.authentication.password   = cfg->password,
         .credentials.client_id                 = cfg->client_id,
         .session.keepalive                     = cfg->keepalive_s,
         .session.message_retransmit_timeout    = 10000, /* default 1 s floods a slow link */
         .network.reconnect_timeout_ms          = cfg->reconnect_ms,
         .network.timeout_ms                    = 20000,
-        .buffer.size                           = 2048,
+        .buffer.size                           = 2048 + 512, /* a firmware chunk in one piece */
         .buffer.out_size                       = 2048,
         .task.stack_size                       = 8192,
     };

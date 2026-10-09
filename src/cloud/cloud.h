@@ -34,6 +34,12 @@ cloud_state_e cloud_state(void);
 /* Server settings, persisted; the client reconnects with them. */
 bool cloud_set_server(const char *host, uint16_t port);
 bool cloud_set_token(const char *token);
+/* MQTT password, for an own broker in front of ThingsBoard; "" clears it. */
+bool cloud_set_password(const char *password);
 void cloud_get_server(char *host, size_t cap, uint16_t *port, bool *has_token);
+bool cloud_has_password(void);
+
+/* Drop the broker connection and connect again at once (stuck link). */
+void cloud_reconnect(void);
 
 #endif /* CLOUD_H_ */

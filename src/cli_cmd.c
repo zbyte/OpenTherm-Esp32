@@ -19,6 +19,7 @@
 #include "clock.h"
 #include "energy.h"
 #include "cloud.h"
+#include "fw_update.h"
 #include "ds18b20.h"
 #include "net.h"
 #include "tuya_kconfig.h"
@@ -329,16 +330,25 @@ static void cmd_tb(int argc, char *argv[])
         cloud_set_token(argv[2]);
         return;
     }
+    if (argc == 3 && !strcmp(argv[1], "pass")) {
+        cloud_set_password(strcmp(argv[2], "-") ? argv[2] : "");
+        return;
+    }
     char     host[64];
     uint16_t port;
     bool     tok;
     cloud_get_server(host, sizeof(host), &port, &tok);
     mqtt_port_stats_t st;
     mqtt_port_get_stats(&st);
-    PR_NOTICE("tb: %s:%u token=%s online=%d connects=%u sent=%u msgs/%u B received=%u msgs/%u B (payload only)",
-              host[0] ? host : "-", port, tok ? "set" : "NONE", cloud_is_online(), st.connects, st.tx_msgs, st.tx_bytes,
+    PR_NOTICE("tb: %s:%u token=%s pass=%s online=%d connects=%u sent=%u msgs/%u B received=%u msgs/%u B (payload only)",
+              host[0] ? host : "-", port, tok ? "set" : "NONE", cloud_has_password() ? "set" : "none",
+              cloud_is_online(), st.connects, st.tx_msgs, st.tx_bytes,
               st.rx_msgs, st.rx_bytes);
-    PR_INFO("usage: tb | tb host <name> [port: 8883 TLS, 1883 plain] | tb token <device access token>");
+    char fw[192];
+    fw_update_describe(fw, sizeof(fw));
+    PR_NOTICE("tb: %s", fw);
+    PR_INFO("usage: tb | tb host <name> [port: 8883 TLS, 1883 plain] | tb token <device access token> | "
+            "tb pass <MQTT password of an own broker, - to clear>");
 }
 
 static void cmd_tz(int argc, char *argv[])
@@ -398,7 +408,7 @@ int app_cli_exec(const char *line)
         return -1;
     }
     bool secret = (!strcmp(argv[0], "wifi") && argc > 2) ||
-                  (!strcmp(argv[0], "tb") && argc > 1 && !strcmp(argv[1], "token"));
+                  (!strcmp(argv[0], "tb") && argc > 1 && (!strcmp(argv[1], "token") || !strcmp(argv[1], "pass")));
     for (size_t i = 0; i < sizeof(s_cli_cmd) / sizeof(s_cli_cmd[0]); i++) {
         if (!strcmp(argv[0], s_cli_cmd[i].name)) {
             PR_NOTICE("remote cli> %s", secret ? "(line with a secret, not shown)" : line);

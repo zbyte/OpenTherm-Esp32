@@ -35,6 +35,7 @@
 #include "boiler.h"
 #include "clock.h"
 #include "energy.h"
+#include "fw_update.h"
 #include "log_ring.h"
 #include "net.h"
 #include "ot_port.h"
@@ -89,6 +90,7 @@ static struct {
     char     host[64];
     uint16_t port;
     char     token[64];
+    char     pass[64]; /* MQTT password, own broker only */
 } s_cfg;
 static MUTEX_HANDLE  s_cfg_lock;
 static volatile bool s_restart; /* server settings changed */
@@ -99,6 +101,7 @@ static void cfg_save(void)
     cJSON_AddStringToObject(root, "h", s_cfg.host);
     cJSON_AddNumberToObject(root, "p", s_cfg.port);
     cJSON_AddStringToObject(root, "t", s_cfg.token);
+    cJSON_AddStringToObject(root, "w", s_cfg.pass);
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!json || tal_kv_set(KV_KEY, (const uint8_t *)json, strlen(json)) != OPRT_OK) {
@@ -124,7 +127,7 @@ static void cfg_load(void)
         json[len]   = 0;
         cJSON *root = cJSON_Parse(json);
         cJSON *h = cJSON_GetObjectItem(root, "h"), *p = cJSON_GetObjectItem(root, "p");
-        cJSON *t = cJSON_GetObjectItem(root, "t");
+        cJSON *t = cJSON_GetObjectItem(root, "t"), *w = cJSON_GetObjectItem(root, "w");
         if (cJSON_IsString(h) && h->valuestring[0]) {
             snprintf(s_cfg.host, sizeof(s_cfg.host), "%s", h->valuestring);
         }
@@ -133,6 +136,9 @@ static void cfg_load(void)
         }
         if (cJSON_IsString(t) && t->valuestring[0]) {
             snprintf(s_cfg.token, sizeof(s_cfg.token), "%s", t->valuestring);
+        }
+        if (cJSON_IsString(w)) {
+            snprintf(s_cfg.pass, sizeof(s_cfg.pass), "%s", w->valuestring);
         }
         cJSON_Delete(root);
         tal_free(json);
@@ -167,6 +173,30 @@ bool cloud_set_token(const char *token)
     PR_NOTICE("cloud: access token updated");
     s_restart = true;
     return true;
+}
+
+bool cloud_set_password(const char *password)
+{
+    if (!password || strlen(password) >= sizeof(s_cfg.pass)) {
+        return false;
+    }
+    tal_mutex_lock(s_cfg_lock);
+    snprintf(s_cfg.pass, sizeof(s_cfg.pass), "%s", password);
+    cfg_save();
+    tal_mutex_unlock(s_cfg_lock);
+    PR_NOTICE("cloud: MQTT password %s", password[0] ? "set" : "cleared");
+    s_restart = true;
+    return true;
+}
+
+bool cloud_has_password(void)
+{
+    return s_cfg.pass[0] != 0;
+}
+
+void cloud_reconnect(void)
+{
+    s_restart = true;
 }
 
 void cloud_get_server(char *host, size_t cap, uint16_t *port, bool *has_token)
@@ -809,6 +839,7 @@ static bool shared_apply(const char *key, const cJSON *v)
 static void shared_handle(const cJSON *obj, bool fresh)
 {
     bool dirty = false;
+    fw_update_on_shared(obj);
     for (size_t k = 0; k < sizeof(s_shared_keys) / sizeof(s_shared_keys[0]); k++) {
         const char  *key = s_shared_keys[k];
         const cJSON *v   = cJSON_GetObjectItem(obj, key);
@@ -836,6 +867,9 @@ static void shared_handle(const cJSON *obj, bool fresh)
 
 static void on_message(const char *topic, int topic_len, const char *data, int data_len)
 {
+    if (fw_update_on_message(topic, topic_len, data, data_len)) {
+        return;
+    }
     if (topic_len == (int)strlen(TOPIC_ATTR) && !strncmp(topic, TOPIC_ATTR, (size_t)topic_len)) {
         cJSON *obj = cJSON_ParseWithLength(data, (size_t)data_len);
         shared_handle(obj, true);
@@ -920,11 +954,12 @@ cloud_state_e cloud_state(void)
 
 static void client_start(void)
 {
-    static char uri[96], token[64], client_id[24];
+    static char uri[96], token[64], pass[64], client_id[24];
 
     tal_mutex_lock(s_cfg_lock);
     snprintf(uri, sizeof(uri), "%s://%s:%u", s_cfg.port == 1883 ? "mqtt" : "mqtts", s_cfg.host, s_cfg.port);
     snprintf(token, sizeof(token), "%s", s_cfg.token);
+    snprintf(pass, sizeof(pass), "%s", s_cfg.pass);
     tal_mutex_unlock(s_cfg_lock);
 
     NW_MAC_S mac = {0};
@@ -934,6 +969,7 @@ static void client_start(void)
     mqtt_port_cfg_t cfg = {
         .uri          = uri,
         .username     = token,
+        .password     = pass[0] ? pass : NULL,
         .client_id    = client_id,
         .keepalive_s  = KEEPALIVE_S,
         .reconnect_ms = RECONNECT_MS,
@@ -953,6 +989,7 @@ void cloud_init(void)
     tal_mutex_create_init(&s_cfg_lock);
     cfg_load();
     seen_load();
+    fw_update_init();
     if (!s_cfg.host[0] || !s_cfg.token[0]) {
         PR_WARN("cloud: no ThingsBoard server/token; set with: tb host <name> [port] / tb token <token>");
     }
@@ -976,13 +1013,17 @@ void cloud_run(void)
             mqtt_port_subscribe(TOPIC_RPC "+", 1);
             mqtt_port_subscribe(TOPIC_ATTR, 1);
             mqtt_port_subscribe(TOPIC_ARSP "+", 1);
+            if (fw_update_on_connect()) {
+                /* downloading firmware: only resume it, changes still go out below */
+                continue;
+            }
             send_attributes(SET_F_ALL, true);
             {
-                /* commands set while the device was offline */
+                /* commands set while the device was offline, firmware package */
                 static const char req[] =
                     "{\"sharedKeys\":\"set_heating,set_mode,set_temp,set_boiler,set_lower,set_upper,set_sensor,"
                     "set_tz,set_schedule,set_sched_all,set_sched_mon,set_sched_tue,set_sched_wed,set_sched_thu,"
-                    "set_sched_fri,set_sched_sat,set_sched_sun\"}";
+                    "set_sched_fri,set_sched_sat,set_sched_sun," FW_UPDATE_SHARED_KEYS "\"}";
                 mqtt_port_publish(TOPIC_AREQ, req, (int)strlen(req), 1);
             }
             __atomic_fetch_and(&s_pending_settings, 0, __ATOMIC_SEQ_CST);
@@ -1001,6 +1042,7 @@ void cloud_run(void)
                 send_telemetry(false);
             }
         }
+        fw_update_tick();
         tal_system_sleep(TICK_MS);
     }
 }

@@ -257,6 +257,10 @@ size_t web_page(char *buf, size_t cap)
     row(&o, "ThingsBoard: токен устройства");
     put(&o, "<input type=password name=token style='width:14em' placeholder='%s'></td></tr>",
         tok ? "задан, не менять" : "не задан");
+    row(&o, "Пароль MQTT (свой брокер)");
+    put(&o, "<input type=password name=mqpass style='width:14em' placeholder='%s'> "
+            "<label><input type=checkbox name=mqclear value=1> убрать</label></td></tr>",
+        cloud_has_password() ? "задан, не менять" : "не нужен для ThingsBoard");
     row(&o, "Часовой пояс, минут от UTC");
     put(&o, "<input type=number name=tz value=%d></td></tr>", c.tz_min);
     put(&o, "</table><input type=hidden name=form value=net><button type=submit>Сохранить подключение</button>"
@@ -317,7 +321,7 @@ static bool field_x10(const char *body, const char *name, int16_t *x10)
 
 static void net_form(const char *body)
 {
-    char     ssid[33], pass[65], host[64], token[64], v[16];
+    char     ssid[33], pass[65], host[64], token[64], mqpass[64], v[16];
     char     cur_host[64];
     uint16_t cur_port;
     bool     tok;
@@ -332,6 +336,11 @@ static void net_form(const char *body)
     }
     if (field(body, "token", token, sizeof(token)) && token[0]) {
         cloud_set_token(token);
+    }
+    if (field(body, "mqclear", v, sizeof(v)) && v[0]) {
+        cloud_set_password("");
+    } else if (field(body, "mqpass", mqpass, sizeof(mqpass)) && mqpass[0]) {
+        cloud_set_password(mqpass);
     }
     /* last: it may drop the link this page came over */
     if (field(body, "ssid", ssid, sizeof(ssid)) && ssid[0] && field(body, "pass", pass, sizeof(pass))) {

@@ -119,6 +119,15 @@ typedef size_t (*lan_log_read_cb_t)(char *buf, size_t cap);
 typedef int (*lan_cli_exec_cb_t)(const char *line);
 void lan_debug_set_handlers(lan_log_read_cb_t log_cb, lan_cli_exec_cb_t cli_cb);
 
+/* Firmware update written as it arrives (fw_port.c), e.g. from ThingsBoard.
+ * begin: image size and checksum algorithm (SHA256, SHA384, SHA512, MD5);
+ * finish: OT_PORT_INVALID on a checksum mismatch, OT_PORT_ERR if the image is
+ * bad; on OT_PORT_OK it boots next (restart to run it). */
+int  fw_port_begin(uint32_t size, const char *checksum_alg);
+int  fw_port_write(const void *data, size_t len);
+int  fw_port_finish(const char *checksum_hex);
+void fw_port_abort(void);
+
 /* MQTT client (net_port.c). Callbacks run in the client task; the message
  * buffers are only valid during the call. */
 typedef void (*mqtt_port_conn_cb_t)(bool connected);
@@ -126,6 +135,7 @@ typedef void (*mqtt_port_msg_cb_t)(const char *topic, int topic_len, const char 
 typedef struct {
     const char         *uri; /* mqtt://host:1883 or mqtts://host:8883 (verified) */
     const char         *username;
+    const char         *password;  /* NULL: none (ThingsBoard needs only the token) */
     const char         *client_id;
     int                 keepalive_s;
     int                 reconnect_ms;
