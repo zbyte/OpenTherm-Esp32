@@ -1,0 +1,174 @@
+.ots {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    gap: 6px;
+    font-size: 13px;
+    overflow: auto;
+}
+.ots-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+.ots-note, .ots-ehint {
+    opacity: 0.7;
+    font-size: 12px;
+}
+.ots-buttons {
+    display: flex;
+    gap: 6px;
+}
+.ots-btn {
+    padding: 4px 12px;
+    border: 1px solid rgba(128, 128, 128, 0.5);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+.ots-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+.ots-primary {
+    background: #305680;
+    border-color: #305680;
+    color: #fff;
+}
+.ots-warn {
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: rgba(255, 152, 0, 0.15);
+    color: #b26a00;
+}
+.ots-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.ots-empty {
+    padding: 16px 0;
+    opacity: 0.7;
+}
+.ots-scale, .ots-row {
+    display: grid;
+    grid-template-columns: 28px minmax(120px, 1fr) minmax(0, 260px);
+    gap: 8px;
+    align-items: center;
+}
+.ots-scale > div {
+    position: relative;
+    height: 14px;
+}
+.ots-scale i {
+    position: absolute;
+    transform: translateX(-50%);
+    font-style: normal;
+    font-size: 10px;
+    opacity: 0.6;
+}
+.ots-scale i:first-child {
+    transform: none;
+}
+.ots-day {
+    font-weight: 500;
+}
+.ots-today .ots-day {
+    color: #305680;
+    font-weight: 700;
+}
+.ots-bar {
+    position: relative;
+    height: 22px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: rgba(128, 128, 128, 0.1);
+}
+.ots-seg {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 11px;
+    color: #fff;
+    box-shadow: inset -1px 0 rgba(255, 255, 255, 0.6);
+}
+.ots-seg.ots-off {
+    color: inherit;
+    opacity: 0.8;
+}
+.ots-now {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    margin-left: -1px;
+    background: #000;
+}
+.ots-pts {
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ots-erow {
+    display: grid;
+    grid-template-columns: 28px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+}
+.ots-epts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+}
+.ots-pt {
+    display: inline-flex;
+    gap: 2px;
+}
+.ots-pt input, .ots-copy {
+    padding: 2px 4px;
+    border: 1px solid rgba(128, 128, 128, 0.5);
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+}
+.ots-pt input[type="number"] {
+    width: 56px;
+}
+.ots-pt input.ots-bad {
+    border-color: #d32f2f;
+    background: rgba(211, 47, 47, 0.08);
+}
+.ots-msg {
+    min-height: 16px;
+    font-size: 12px;
+}
+.ots-msg.ots-ok {
+    color: #2e7d32;
+}
+.ots-msg.ots-warn {
+    color: #b26a00;
+}
+.ots-msg.ots-err {
+    color: #d32f2f;
+}
+@media (max-width: 560px) {
+    .ots-scale, .ots-row {
+        grid-template-columns: 28px 1fr;
+    }
+    .ots-scale > span:last-child, .ots-pts {
+        display: none;
+    }
+}
