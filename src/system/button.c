@@ -6,15 +6,15 @@
 #include "button.h"
 
 #include "tal_api.h"
-#include "tuya_iot.h"
 #include "tuya_kconfig.h"
 
+#include "net.h"
 #include "ot_port.h"
 #include "settings.h"
 
 #define POLL_MS       20
 #define DEBOUNCE_MS   60
-#define UNBIND_MS     5000
+#define SETUP_MS      5000
 #define FACTORY_MS    10000
 #define CORE          0
 #define PRIO          6
@@ -24,17 +24,16 @@ static volatile button_hold_e s_level;
 static button_hold_e level_for(uint32_t held_ms)
 {
     return held_ms >= FACTORY_MS ? BUTTON_HOLD_FACTORY
-           : held_ms >= UNBIND_MS ? BUTTON_HOLD_UNBIND
+           : held_ms >= SETUP_MS  ? BUTTON_HOLD_SETUP
                                   : BUTTON_HOLD_NONE;
 }
 
 static void on_release(uint32_t held_ms)
 {
     switch (level_for(held_ms)) {
-    case BUTTON_HOLD_UNBIND:
-        PR_NOTICE("button: %u ms -> unbind (Wi-Fi + pairing reset)", held_ms);
-        /* the SDK reboots after TUYA_EVENT_RESET_COMPLETE, i.e. after release */
-        tuya_iot_reset(tuya_iot_client_get());
+    case BUTTON_HOLD_SETUP:
+        PR_NOTICE("button: %u ms -> setup access point", held_ms);
+        net_setup_start();
         break;
     case BUTTON_HOLD_FACTORY:
         PR_NOTICE("button: %u ms -> heating settings reset", held_ms);
@@ -82,7 +81,7 @@ static void button_task(void *arg)
             if (lvl != s_level) {
                 s_level = lvl;
                 PR_INFO("button: release now to %s", lvl == BUTTON_HOLD_FACTORY ? "reset heating settings"
-                                                                                  : "unbind");
+                                                                                  : "open the setup access point");
             }
         }
         tal_system_sleep(POLL_MS);

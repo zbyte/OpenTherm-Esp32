@@ -2,7 +2,8 @@
  * @file button.h
  * @brief Service button (BOOT, GPIO0): actions on RELEASE, by hold time.
  *
- *   5..10 s -> unbind: Wi-Fi + pairing are reset, heating keeps running
+ *   5..10 s -> setup access point for 10 minutes (Wi-Fi, ThingsBoard token);
+ *              heating keeps running
  *   >= 10 s -> heating settings back to defaults
  *
  * Nothing happens while the button is held, so the chip never reboots with
@@ -16,7 +17,7 @@
 
 typedef enum {
     BUTTON_HOLD_NONE    = 0,
-    BUTTON_HOLD_UNBIND  = 1, /* released now -> unbind */
+    BUTTON_HOLD_SETUP   = 1, /* released now -> setup access point */
     BUTTON_HOLD_FACTORY = 2, /* released now -> settings reset */
 } button_hold_e;
 

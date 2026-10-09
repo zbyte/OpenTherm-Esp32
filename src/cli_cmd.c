@@ -1,10 +1,10 @@
 /**
  * @file cli_cmd.c
- * @brief Debug CLI over the USB serial console (prompt "tuya> ").
+ * @brief Debug CLI over the USB serial console, also run
+ *        remotely via POST /cli on the LAN and the "cli" RPC from ThingsBoard.
  *
  * Covers everything the app does, so the firmware can be exercised without
- * the cloud. License commands (auth, auth-read, auth-reset) are registered by
- * tuya_authorize_init() in cloud.c.
+ * the cloud.
  */
 
 #include <stdlib.h>
@@ -12,7 +12,6 @@
 
 #include "tal_api.h"
 #include "tal_cli.h"
-#include "tuya_iot.h"
 
 #include "boiler.h"
 #include "bmp180.h"
@@ -21,6 +20,7 @@
 #include "energy.h"
 #include "cloud.h"
 #include "ds18b20.h"
+#include "net.h"
 #include "tuya_kconfig.h"
 #include "ot_frame.h"
 #include "ot_port.h"
@@ -31,7 +31,6 @@
 #include "supervisor.h"
 
 extern void tal_kv_cmd(int argc, char *argv[]);
-extern void netmgr_cmd(int argc, char *argv[]);
 
 static const char *const s_modes[HEAT_MODE_COUNT] = {"auto", "manual", "home", "leave"};
 static const char *const s_work[]                 = {"heating", "warm", "idle"};
@@ -63,10 +62,13 @@ static void cmd_status(int argc, char *argv[])
               "oem=%u",
               b.comm_ok, b.comm_errors, b.ch_enable_cmd, b.tset_x10_cmd, b.fault, b.ch_active, b.flame, b.flow_x10,
               b.flow_valid ? "" : "?", b.rel_mod_x10, b.mod_valid ? "" : "?", b.asf_flags, b.oem_fault);
-    char ip[16] = "-";
+    char   ip[16] = "-", ssid[33];
+    int8_t rssi   = 0;
     sys_port_sta_ip(ip, sizeof(ip));
-    PR_NOTICE("cloud:    online=%d activated=%d ip=%s heap=%d", cloud_is_online(),
-              tuya_iot_activated(tuya_iot_client_get()), ip, tal_system_get_free_heap_size());
+    net_get_ssid(ssid, sizeof(ssid));
+    net_rssi(&rssi);
+    PR_NOTICE("network:  wifi=%s up=%d setup_ap=%d ip=%s rssi=%d cloud=%d heap=%d", ssid, net_is_up(),
+              net_setup_active(), ip, rssi, cloud_is_online(), tal_system_get_free_heap_size());
     /* SYS_TIME_T is 64-bit here and PR_* has no format checking: cast. */
     PR_NOTICE("system:   uptime=%us reset=%s app=%s last_stall=%s", (unsigned)(tal_system_get_millisecond() / 1000),
               sys_port_reset_reason(), sys_port_running_partition(), supervisor_last_stall());
@@ -298,12 +300,56 @@ static void cmd_energy(int argc, char *argv[])
 static void cmd_report(int argc, char *argv[])
 {
     cloud_report_all();
-    PR_NOTICE("report: all DPs queued (sent when online)");
+    PR_NOTICE("report: everything queued for ThingsBoard (sent when online)");
 }
 
-static void cmd_unbind(int argc, char *argv[])
+static void cmd_wifi(int argc, char *argv[])
 {
-    tuya_iot_reset(tuya_iot_client_get());
+    if (argc == 2 && !strcmp(argv[1], "setup")) {
+        net_setup_start();
+        return;
+    }
+    /* an open network has no password */
+    if ((argc == 2 || argc == 3) && net_set_wifi(argv[1], argc == 3 ? argv[2] : "")) {
+        return;
+    }
+    char ssid[33];
+    net_get_ssid(ssid, sizeof(ssid));
+    PR_NOTICE("wifi: %s up=%d setup_ap=%d", ssid[0] ? ssid : "-", net_is_up(), net_setup_active());
+    PR_INFO("usage: wifi <ssid> [password] | wifi setup  (names with spaces: use the web UI)");
+}
+
+static void cmd_tb(int argc, char *argv[])
+{
+    if ((argc == 3 || argc == 4) && !strcmp(argv[1], "host")) {
+        cloud_set_server(argv[2], (uint16_t)(argc == 4 ? atoi(argv[3]) : 8883));
+        return;
+    }
+    if (argc == 3 && !strcmp(argv[1], "token")) {
+        cloud_set_token(argv[2]);
+        return;
+    }
+    char     host[64];
+    uint16_t port;
+    bool     tok;
+    cloud_get_server(host, sizeof(host), &port, &tok);
+    mqtt_port_stats_t st;
+    mqtt_port_get_stats(&st);
+    PR_NOTICE("tb: %s:%u token=%s online=%d connects=%u sent=%u msgs/%u B received=%u msgs/%u B (payload only)",
+              host[0] ? host : "-", port, tok ? "set" : "NONE", cloud_is_online(), st.connects, st.tx_msgs, st.tx_bytes,
+              st.rx_msgs, st.rx_bytes);
+    PR_INFO("usage: tb | tb host <name> [port: 8883 TLS, 1883 plain] | tb token <device access token>");
+}
+
+static void cmd_tz(int argc, char *argv[])
+{
+    if (argc == 2 && !settings_set_tz((int16_t)atoi(argv[1]), SETTINGS_SRC_LOCAL)) {
+        PR_INFO("usage: tz [minutes from UTC, e.g. 180 for Moscow]");
+        return;
+    }
+    settings_t c;
+    settings_get(&c);
+    PR_NOTICE("tz: %d min", c.tz_min);
 }
 
 static void cmd_factory(int argc, char *argv[])
@@ -326,32 +372,36 @@ static cli_cmd_t s_cli_cmd[] = {
     {.name = "led", .func = cmd_led, .help = "LED colour test"},
     {.name = "wdt", .func = cmd_wdt, .help = "watchdog test"},
     {.name = "energy", .func = cmd_energy, .help = "energy [reset]: estimated power/energy"},
-    {.name = "report", .func = cmd_report, .help = "report all DPs to the cloud"},
-    {.name = "unbind", .func = cmd_unbind, .help = "unbind and restart pairing"},
+    {.name = "tz", .func = cmd_tz, .help = "tz [minutes]: time zone"},
+    {.name = "wifi", .func = cmd_wifi, .help = "wifi <ssid> [password] | wifi setup"},
+    {.name = "tb", .func = cmd_tb, .help = "ThingsBoard server and token"},
+    {.name = "report", .func = cmd_report, .help = "send everything to ThingsBoard again"},
     {.name = "factory", .func = cmd_factory, .help = "reset heating settings to defaults"},
     {.name = "kv", .func = tal_kv_cmd, .help = "kv store"},
-    {.name = "netmgr", .func = netmgr_cmd, .help = "network manager"},
 };
 
-/* Runs one command line from the LAN debug endpoint (POST /cli) against the
- * table above. The license commands are deliberately not reachable here. */
+/* Runs one command line from the LAN (POST /cli) or ThingsBoard ("cli" RPC)
+ * against the table above. Lines with secrets are not echoed to the log. */
 int app_cli_exec(const char *line)
 {
     char  buf[128];
     char *argv[8];
+    char *save = NULL;
     int   argc = 0;
     strncpy(buf, line, sizeof(buf) - 1);
     buf[sizeof(buf) - 1] = 0;
     static const char *const sep = " \t\r\n";
-    for (char *tok = strtok(buf, sep); tok && argc < 8; tok = strtok(NULL, sep)) {
+    for (char *tok = strtok_r(buf, sep, &save); tok && argc < 8; tok = strtok_r(NULL, sep, &save)) {
         argv[argc++] = tok;
     }
     if (argc == 0) {
         return -1;
     }
+    bool secret = (!strcmp(argv[0], "wifi") && argc > 2) ||
+                  (!strcmp(argv[0], "tb") && argc > 1 && !strcmp(argv[1], "token"));
     for (size_t i = 0; i < sizeof(s_cli_cmd) / sizeof(s_cli_cmd[0]); i++) {
         if (!strcmp(argv[0], s_cli_cmd[i].name)) {
-            PR_NOTICE("lan cli> %s", line);
+            PR_NOTICE("remote cli> %s", secret ? "(line with a secret, not shown)" : line);
             s_cli_cmd[i].func(argc, argv);
             return 0;
         }

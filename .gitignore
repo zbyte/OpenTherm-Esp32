@@ -4,3 +4,4 @@ dist/
 .cache/
 .target_logging/
 include/ota_secret.h
+include/tb_secret.h

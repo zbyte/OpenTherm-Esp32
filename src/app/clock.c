@@ -6,7 +6,8 @@
 #include "clock.h"
 
 #include "tal_api.h"
-#include "tuya_kconfig.h"
+
+#include "settings.h"
 
 /* Anything before 2025-01-01 is the unset RTC counting from zero. */
 #define MIN_VALID_EPOCH 1735689600u
@@ -15,16 +16,27 @@ static bool s_manual;
 
 void clock_init(void)
 {
-    /* The cloud overwrites this with the user's zone on sync. */
-    if (tal_time_check_time_zone_sync() != OPRT_OK) {
-        tal_time_set_time_zone_seconds(HEAT_DEFAULT_TZ_MIN * 60);
-    }
+    settings_t c;
+    settings_get(&c);
+    clock_set_tz(c.tz_min);
+}
+
+void clock_set_tz(int16_t minutes)
+{
+    tal_time_set_time_zone_seconds(minutes * 60);
 }
 
 void clock_set_utc(uint32_t epoch)
 {
     tal_time_set_posix((TIME_T)epoch, 1);
     s_manual = true;
+}
+
+void clock_set_utc_synced(uint32_t epoch)
+{
+    if (epoch >= MIN_VALID_EPOCH) {
+        tal_time_set_posix((TIME_T)epoch, 1);
+    }
 }
 
 bool clock_now(uint8_t *weekday, uint16_t *minute)

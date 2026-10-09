@@ -26,9 +26,9 @@ typedef struct {
 } pattern_t;
 
 static const pattern_t P_FACTORY = {LEVEL, 0, LEVEL, 0, 0};
-static const pattern_t P_UNBIND  = {0, LEVEL, LEVEL, 0, 0};
+static const pattern_t P_SETUPBTN = {0, LEVEL, LEVEL, 0, 0};
 static const pattern_t P_FAULT   = {LEVEL, 0, 0, 500, 1000};
-static const pattern_t P_PAIRING = {0, 0, LEVEL, 200, 400};
+static const pattern_t P_SETUP   = {0, 0, LEVEL, 200, 400};
 static const pattern_t P_OFFLINE = {LEVEL, LEVEL / 2, 0, 250, 2000};
 static const pattern_t P_HEATING = {LEVEL, LEVEL / 4, 0, 0, 0};
 static const pattern_t P_ONLINE  = {0, LEVEL, 0, 0, 0};
@@ -38,8 +38,8 @@ static const pattern_t *select_pattern(void)
     switch (button_hold_level()) {
     case BUTTON_HOLD_FACTORY:
         return &P_FACTORY;
-    case BUTTON_HOLD_UNBIND:
-        return &P_UNBIND;
+    case BUTTON_HOLD_SETUP:
+        return &P_SETUPBTN;
     default:
         break;
     }
@@ -51,8 +51,8 @@ static const pattern_t *select_pattern(void)
     }
 
     switch (cloud_state()) {
-    case CLOUD_PAIRING:
-        return &P_PAIRING;
+    case CLOUD_SETUP:
+        return &P_SETUP;
     case CLOUD_OFFLINE:
         return &P_OFFLINE;
     default:

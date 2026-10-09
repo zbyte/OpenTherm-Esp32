@@ -4,7 +4,8 @@
  *
  * Plain server-rendered HTML, no JavaScript. Every change goes through the
  * same settings setters as the CLI (source LOCAL), so it is persisted and
- * reported to the cloud like any other local change.
+ * reported to ThingsBoard like any other local change. In setup mode the same
+ * page, served on the access point, is where Wi-Fi and the token are entered.
  */
 
 #include "web.h"
@@ -15,7 +16,6 @@
 #include <string.h>
 
 #include "tal_api.h"
-#include "tuya_iot.h"
 #include "tuya_kconfig.h"
 
 #include "bmp180.h"
@@ -23,6 +23,7 @@
 #include "clock.h"
 #include "cloud.h"
 #include "energy.h"
+#include "net.h"
 #include "ot_port.h"
 #include "regulator.h"
 #include "sensors.h"
@@ -219,14 +220,47 @@ size_t web_page(char *buf, size_t cap)
     } else {
         put(&o, "неизвестно</td></tr>");
     }
-    row(&o, "Облако Tuya");
+    row(&o, "ThingsBoard");
     put(&o, "%s</td></tr>", cloud_is_online() ? "на связи" : "нет связи");
-    row(&o, "IP / свободная память");
-    put(&o, "%s / %d байт</td></tr>", ip, tal_system_get_free_heap_size());
+    row(&o, "Wi-Fi / IP / сигнал");
+    {
+        char   ssid[33];
+        int8_t rssi = 0;
+        net_get_ssid(ssid, sizeof(ssid));
+        put(&o, "%s / %s / ", ssid[0] ? ssid : "не задан", ip);
+        if (net_rssi(&rssi)) {
+            put(&o, "%d дБм</td></tr>", rssi);
+        } else {
+            put(&o, "—</td></tr>");
+        }
+    }
+    row(&o, "Свободная память");
+    put(&o, "%d байт</td></tr>", tal_system_get_free_heap_size());
     row(&o, "Время работы / причина старта");
     put(&o, "%u с / %s</td></tr>", (unsigned)(tal_system_get_millisecond() / 1000), sys_port_reset_reason());
     row(&o, "Последнее зависание");
-    put(&o, "%s</td></tr></table></body></html>", supervisor_last_stall());
+    put(&o, "%s</td></tr></table>", supervisor_last_stall());
+
+    /* connection form: empty fields keep the stored values */
+    char     host[64];
+    uint16_t port;
+    bool     tok;
+    cloud_get_server(host, sizeof(host), &port, &tok);
+    put(&o, "<h3>Подключение</h3><form method=post action=/set><table>");
+    row(&o, "Wi-Fi: сеть");
+    put(&o, "<input type=text name=ssid style='width:14em' placeholder='не менять'></td></tr>");
+    row(&o, "Wi-Fi: пароль");
+    put(&o, "<input type=password name=pass style='width:14em'></td></tr>");
+    row(&o, "ThingsBoard: сервер");
+    put(&o, "<input type=text name=host style='width:14em' value='%s'> порт <input type=number name=port value=%u>"
+            "</td></tr>", host, port);
+    row(&o, "ThingsBoard: токен устройства");
+    put(&o, "<input type=password name=token style='width:14em' placeholder='%s'></td></tr>",
+        tok ? "задан, не менять" : "не задан");
+    row(&o, "Часовой пояс, минут от UTC");
+    put(&o, "<input type=number name=tz value=%d></td></tr>", c.tz_min);
+    put(&o, "</table><input type=hidden name=form value=net><button type=submit>Сохранить подключение</button>"
+            "</form></body></html>");
 
     return o.len;
 }
@@ -281,6 +315,30 @@ static bool field_x10(const char *body, const char *name, int16_t *x10)
     return true;
 }
 
+static void net_form(const char *body)
+{
+    char     ssid[33], pass[65], host[64], token[64], v[16];
+    char     cur_host[64];
+    uint16_t cur_port;
+    bool     tok;
+    cloud_get_server(cur_host, sizeof(cur_host), &cur_port, &tok);
+
+    if (field(body, "tz", v, sizeof(v)) && v[0]) {
+        settings_set_tz((int16_t)atoi(v), SETTINGS_SRC_LOCAL);
+    }
+    if (field(body, "host", host, sizeof(host)) && host[0] && field(body, "port", v, sizeof(v)) && atoi(v) > 0 &&
+        (strcmp(host, cur_host) != 0 || atoi(v) != cur_port)) {
+        cloud_set_server(host, (uint16_t)atoi(v));
+    }
+    if (field(body, "token", token, sizeof(token)) && token[0]) {
+        cloud_set_token(token);
+    }
+    /* last: it may drop the link this page came over */
+    if (field(body, "ssid", ssid, sizeof(ssid)) && ssid[0] && field(body, "pass", pass, sizeof(pass))) {
+        net_set_wifi(ssid, pass);
+    }
+}
+
 void web_form(const char *body)
 {
     char    v[16];
@@ -320,6 +378,8 @@ void web_form(const char *body)
         if (field(body, "sensor", v, sizeof(v)) && atoi(v) != c.control_sensor) {
             settings_set_control_sensor((uint8_t)atoi(v), SETTINGS_SRC_LOCAL);
         }
+    } else if (!strcmp(v, "net")) {
+        net_form(body);
     } else if (!strcmp(v, "schedule")) {
         settings_t c;
         settings_get(&c);

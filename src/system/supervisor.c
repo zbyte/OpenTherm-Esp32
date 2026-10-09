@@ -91,8 +91,8 @@ static void supervisor_task(void *arg)
         if (all_alive(now, !reported)) {
             wdt_port_feed();
             reported = false;
-            /* An OTA image must also prove it can reach the cloud: otherwise
-             * it could never be updated over the air again. */
+            /* An OTA image must also prove it can reach ThingsBoard:
+             * otherwise it could never be managed remotely again. */
             if (ota_pending && now - healthy_since >= OTA_CONFIRM_MS && cloud_state() == CLOUD_ONLINE) {
                 ota_pending = sys_port_ota_mark_valid() != OT_PORT_OK;
                 PR_NOTICE("supervisor: firmware confirmed%s", ota_pending ? " FAILED" : "");

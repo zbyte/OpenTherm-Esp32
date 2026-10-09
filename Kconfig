@@ -105,7 +105,7 @@ config HEAT_DEFAULT_SET_X10
     default 200
 
 config HEAT_DEFAULT_TZ_MIN
-    int "Time zone offset used until the cloud sends one, minutes"
+    int "Default time zone offset from UTC, minutes (a setting afterwards)"
     default 180
 
 endmenu

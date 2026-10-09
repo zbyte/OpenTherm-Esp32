@@ -1,6 +1,7 @@
 ##
 # @file CMakeLists.txt
-# @brief Opentherm ESP32-S3 thermostat firmware (TuyaOpen application).
+# @brief Opentherm ESP32-S3 thermostat firmware (built with the TuyaOpen framework,
+#        cloud: ThingsBoard over MQTT).
 #/
 
 set(APP_PATH ${CMAKE_CURRENT_LIST_DIR})
@@ -14,6 +15,7 @@ set(APP_INC
     ${APP_PATH}/src/app
     ${APP_PATH}/src/cloud
     ${APP_PATH}/src/control
+    ${APP_PATH}/src/net
     ${APP_PATH}/src/opentherm
     ${APP_PATH}/src/system
     ${APP_PATH}/esp_components/ot_port/include

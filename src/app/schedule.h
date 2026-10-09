@@ -1,13 +1,11 @@
 /**
  * @file schedule.h
- * @brief Weekly program in the week_program_2 layout.
+ * @brief Weekly program.
  *
  * 7 days (Monday first) x 4 switch points x 4 bytes:
  * hour, minute, temperature (big-endian, 0.1 degC). The temperature is the
  * boiler FLOW setpoint (below 20 degC = boiler off) and holds until the next
- * point, across midnight.
- * Layout per the DP description on the Tuya platform; confirmed on 2026-09-27
- * with a packet from the Smart Life Week Program 2 editor (Sunday = day 7).
+ * point, across midnight. Stored as is in the settings (Sunday = day 7).
  */
 
 #ifndef SCHEDULE_H_

@@ -18,3 +18,7 @@ CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 # the default 512 bytes made web-form POSTs fail with "Header fields are too long".
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 CONFIG_HTTPD_MAX_URI_LEN=512
+
+# The MQTT client task stays on the network core, away from OpenTherm (core 1).
+CONFIG_MQTT_TASK_CORE_SELECTION_ENABLED=y
+CONFIG_MQTT_USE_CORE_0=y

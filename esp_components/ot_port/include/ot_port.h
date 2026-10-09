@@ -119,6 +119,45 @@ typedef size_t (*lan_log_read_cb_t)(char *buf, size_t cap);
 typedef int (*lan_cli_exec_cb_t)(const char *line);
 void lan_debug_set_handlers(lan_log_read_cb_t log_cb, lan_cli_exec_cb_t cli_cb);
 
+/* MQTT client (net_port.c). Callbacks run in the client task; the message
+ * buffers are only valid during the call. */
+typedef void (*mqtt_port_conn_cb_t)(bool connected);
+typedef void (*mqtt_port_msg_cb_t)(const char *topic, int topic_len, const char *data, int data_len);
+typedef struct {
+    const char         *uri; /* mqtt://host:1883 or mqtts://host:8883 (verified) */
+    const char         *username;
+    const char         *client_id;
+    int                 keepalive_s;
+    int                 reconnect_ms;
+    mqtt_port_conn_cb_t on_conn;
+    mqtt_port_msg_cb_t  on_msg;
+} mqtt_port_cfg_t;
+int  mqtt_port_start(const mqtt_port_cfg_t *cfg);
+void mqtt_port_stop(void);
+bool mqtt_port_connected(void);
+int  mqtt_port_publish(const char *topic, const char *data, int len, int qos);
+int  mqtt_port_subscribe(const char *topic, int qos);
+/* Since boot; bytes are topic + payload only (no MQTT/TLS/TCP overhead). */
+typedef struct {
+    uint32_t connects;
+    uint32_t tx_msgs, tx_bytes;
+    uint32_t rx_msgs, rx_bytes;
+} mqtt_port_stats_t;
+void mqtt_port_get_stats(mqtt_port_stats_t *out);
+
+/* Wi-Fi modem sleep off: the board is mains powered, and with sleep on idle
+ * TLS sessions stalled (no ACKs) every few minutes. */
+void sys_port_wifi_ps_off(void);
+
+/* SNTP (net_port.c): on_sync gets UTC seconds after every synchronisation. */
+typedef void (*sntp_port_cb_t)(uint32_t epoch);
+int sntp_port_start(const char *server, sntp_port_cb_t on_sync);
+
+/* Sends IDF component log lines (warnings and up; network details too when
+ * verbose_net) to out instead of only the console. */
+typedef void (*idf_log_out_t)(const char *line);
+void sys_port_idf_log_to(idf_log_out_t out, bool verbose_net);
+
 /* FreeRTOS task pinned to a core (TuyaOpen's thread API has no affinity). */
 typedef void (*ot_port_task_fn_t)(void *arg);
 int ot_port_task_create(ot_port_task_fn_t fn, const char *name, uint32_t stack_bytes, uint32_t priority, int core,

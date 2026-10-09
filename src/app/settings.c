@@ -14,9 +14,9 @@
 #include "sensors.h"
 
 #define KV_KEY          "heat_cfg"
-#define SETTINGS_FORMAT 2 /* 2: + boiler_set_x10 */
+#define SETTINGS_FORMAT 3 /* 2: + boiler_set_x10, 3: + tz_min */
 
-/* DP ranges from the product model (upper_temp / lower_temp). */
+/* Room setpoint limits (ranges kept from the original product model). */
 #define UPPER_MIN 250
 #define UPPER_MAX 350
 #define LOWER_MIN 50
@@ -34,7 +34,7 @@ static settings_change_cb_t s_on_change;
 static void set_defaults(settings_t *c)
 {
     memset(c, 0, sizeof(*c));
-    /* Before the first pairing the device heats with defaults (spec). */
+    /* Out of the box the device heats with defaults (spec). */
     c->sw             = true;
     c->mode           = HEAT_MODE_HOME; /* room at temp_set */
     c->temp_set_x10   = HEAT_DEFAULT_SET_X10;
@@ -43,6 +43,7 @@ static void set_defaults(settings_t *c)
     c->control_sensor = SENSOR_SEL_ROOM1;
     schedule_default(c->schedule);
     c->boiler_set_x10 = 500;
+    c->tz_min         = HEAT_DEFAULT_TZ_MIN;
 }
 
 static void save_locked(void)
@@ -198,11 +199,19 @@ bool settings_set_boiler_set(int16_t x10, settings_src_e src)
     return true;
 }
 
+bool settings_set_tz(int16_t minutes, settings_src_e src)
+{
+    if (minutes < -720 || minutes > 840) {
+        return false;
+    }
+    UPDATE(SET_F_TZ, s_cfg.tz_min != minutes, s_cfg.tz_min = minutes);
+    PR_NOTICE("settings: tz=%d min", minutes);
+    return true;
+}
+
 void settings_reset(void)
 {
     settings_src_e src = SETTINGS_SRC_LOCAL;
-    UPDATE(SET_F_SWITCH | SET_F_MODE | SET_F_TEMP_SET | SET_F_UPPER | SET_F_LOWER | SET_F_SCHEDULE | SET_F_SENSOR |
-               SET_F_BOILER_SET,
-           true, set_defaults(&s_cfg));
+    UPDATE(SET_F_ALL, true, set_defaults(&s_cfg));
     PR_NOTICE("settings: reset to defaults");
 }

@@ -4,9 +4,9 @@
  *
  * Priority (first match wins):
  *   button held 10 s+   magenta, steady   release -> heating settings reset
- *   button held 5..10 s cyan, steady      release -> unbind
+ *   button held 5..10 s cyan, steady      release -> setup access point
  *   any fault           red, 1 Hz blink   sensor / boiler / OpenTherm link
- *   waiting for pairing blue, fast blink
+ *   setup access point  blue, fast blink
  *   no cloud            yellow, short flash every 2 s (heating runs locally)
  *   online, heating     orange, steady
  *   online              green, steady
