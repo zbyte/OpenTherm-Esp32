@@ -1,0 +1,6 @@
+# Copy to config/acl and put the device access token in the user line (the
+# same name the board logs in with). That user may use only the ThingsBoard
+# device topics; nobody else gets anything.
+user DEVICE_ACCESS_TOKEN
+topic readwrite v1/devices/me/#
+topic readwrite v2/fw/#

@@ -1,0 +1,38 @@
+# Bridge to ThingsBoard Cloud. Copy to conf.d/bridge.conf and put the device
+# access token in remote_username (that file stays out of git).
+#
+# One bridge = one ThingsBoard device: the bridge connects with that device's
+# token, and the board's topics (v1/devices/me/..., v2/fw/...) pass through
+# unchanged. Mosquitto subscribes to the local side with "no local", so what
+# comes in from ThingsBoard (shared attributes on v1/devices/me/attributes)
+# is not sent back out.
+
+connection thingsboard
+address mqtt.eu.thingsboard.cloud:8883
+bridge_cafile /etc/ssl/certs/ca-certificates.crt
+# Without TLS instead (encryption not needed):
+#   address mqtt.eu.thingsboard.cloud:1883   and remove bridge_cafile
+
+remote_clientid opentherm-bridge
+remote_username DEVICE_ACCESS_TOKEN
+
+bridge_protocol_version mqttv311
+# ThingsBoard is not Mosquitto: no bridge extensions, no $SYS notifications
+try_private false
+notifications false
+cleansession true
+start_type automatic
+restart_timeout 5 60
+keepalive_interval 60
+
+# board -> ThingsBoard
+topic v1/devices/me/telemetry out 1
+topic v1/devices/me/attributes/request/+ out 1
+topic v1/devices/me/rpc/response/+ out 1
+topic v2/fw/request/+/chunk/+ out 0
+# ThingsBoard -> board
+topic v1/devices/me/attributes/response/+ in 1
+topic v1/devices/me/rpc/request/+ in 1
+topic v2/fw/response/+/chunk/+ in 1
+# both: client attributes go out, shared attribute changes come in
+topic v1/devices/me/attributes both 1
