@@ -2,8 +2,9 @@
  * @file net.h
  * @brief Network link: Wi-Fi station with reconnects, setup access point.
  *
- * Credentials live in KV "netinfo" ({"s":ssid,"p":password}). Without credentials, or after a 5..10 s button press, the
- * board opens the access point "OpenTherm-XXXX" (password = web password)
+ * Up to two networks, KV "netinfo" and "netinfo2" ({"s":ssid,"p":password});
+ * the board connects to whichever of them it finds. Without credentials, or
+ * after a 5..10 s button press, the board opens the access point "OpenTherm-XXXX" (password = web password)
  * with the web UI at http://192.168.4.1:8080/ to enter them.
  */
 
@@ -22,10 +23,14 @@ bool net_setup_active(void); /* setup access point is on */
 /* Opens the setup access point for 10 minutes (button). */
 void net_setup_start(void);
 
-/* Saves new credentials and reconnects (leaves setup mode). */
-bool net_set_wifi(const char *ssid, const char *password);
+/* Saves network n (0 or 1) and reconnects to it (leaves setup mode), unless
+ * the board is up on the other network. An empty ssid removes network 1. */
+bool net_set_wifi(uint8_t n, const char *ssid, const char *password);
 
-/* Configured network name ("" if none) and signal of the current link. */
+/* Name of network n ("" if not set). */
+void net_get_wifi(uint8_t n, char *out, size_t cap);
+
+/* Network in use or being tried ("" if none) and signal of the current link. */
 void net_get_ssid(char *out, size_t cap);
 bool net_rssi(int8_t *dbm);
 

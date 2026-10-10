@@ -64,6 +64,21 @@ static void put(out_t *o, const char *fmt, ...)
     }
 }
 
+/* Text that may hold markup characters (network names). */
+static void put_text(out_t *o, const char *s)
+{
+    for (; *s; s++) {
+        switch (*s) {
+        case '<': put(o, "&lt;"); break;
+        case '>': put(o, "&gt;"); break;
+        case '&': put(o, "&amp;"); break;
+        case '"': put(o, "&quot;"); break;
+        case '\'': put(o, "&#39;"); break;
+        default: put(o, "%c", *s); break;
+        }
+    }
+}
+
 static void put_temp(out_t *o, bool ok, int16_t x10)
 {
     if (ok) {
@@ -234,7 +249,8 @@ size_t web_page(char *buf, size_t cap)
         char   ssid[33];
         int8_t rssi = 0;
         net_get_ssid(ssid, sizeof(ssid));
-        put(&o, "%s / %s / ", ssid[0] ? ssid : "не задан", ip);
+        put_text(&o, ssid[0] ? ssid : "не задан");
+        put(&o, " / %s / ", ip);
         if (net_rssi(&rssi)) {
             put(&o, "%d дБм</td></tr>", rssi);
         } else {
@@ -254,10 +270,19 @@ size_t web_page(char *buf, size_t cap)
     bool     tok;
     cloud_get_server(host, sizeof(host), &port, &tok);
     put(&o, "<h3>Подключение</h3><form method=post action=/set><table>");
-    row(&o, "Wi-Fi: сеть");
-    put(&o, "<input type=text name=ssid style='width:14em' placeholder='не менять'></td></tr>");
-    row(&o, "Wi-Fi: пароль");
-    put(&o, "<input type=password name=pass style='width:14em'></td></tr>");
+    for (uint8_t i = 0; i < 2; i++) {
+        char w[33];
+        net_get_wifi(i, w, sizeof(w));
+        put(&o, "<tr><td>Wi-Fi %u: сеть</td><td><input type=text name=ssid%s style='width:14em' placeholder='",
+            i + 1, i ? "2" : "");
+        put_text(&o, w[0] ? w : "не задана");
+        put(&o, "'>");
+        if (i && w[0]) {
+            put(&o, " <label><input type=checkbox name=w2clear value=1> убрать</label>");
+        }
+        put(&o, "</td></tr><tr><td>Wi-Fi %u: пароль</td><td><input type=password name=pass%s style='width:14em'>"
+                "</td></tr>", i + 1, i ? "2" : "");
+    }
     row(&o, "ThingsBoard: сервер");
     put(&o, "<input type=text name=host style='width:14em' value='%s'> порт <input type=number name=port value=%u>"
             "</td></tr>", host, port);
@@ -350,8 +375,13 @@ static void net_form(const char *body)
         cloud_set_password(mqpass);
     }
     /* last: it may drop the link this page came over */
+    if (field(body, "w2clear", v, sizeof(v)) && v[0]) {
+        net_set_wifi(1, "", "");
+    } else if (field(body, "ssid2", ssid, sizeof(ssid)) && ssid[0] && field(body, "pass2", pass, sizeof(pass))) {
+        net_set_wifi(1, ssid, pass);
+    }
     if (field(body, "ssid", ssid, sizeof(ssid)) && ssid[0] && field(body, "pass", pass, sizeof(pass))) {
-        net_set_wifi(ssid, pass);
+        net_set_wifi(0, ssid, pass);
     }
 }
 

@@ -61,8 +61,10 @@
 - **Свой брокер** перед ThingsBoard (Mosquitto с мостом, `server/mosquitto/`) — если провайдер
   рвёт связь с ThingsBoard Cloud: [docs/mosquitto.md](docs/mosquitto.md). На плате: `tb host
   <сервер> 1883`, `tb pass <пароль>`.
-- **Wi-Fi** хранится в KV под ключом `netinfo`. Задать: веб-форма «Подключение» или
-  `wifi <сеть> [пароль]`.
+- **Wi-Fi** — до двух сетей, в KV под ключами `netinfo` и `netinfo2`. Плата подключается к
+  той, которую находит: если сеть не видна, через несколько секунд пробует другую, и остаётся
+  на подключённой, пока связь не пропадёт. Задать: веб-форма «Подключение» или
+  `wifi <сеть> [пароль]`, `wifi2 <сеть> [пароль]` (`wifi2 -` — убрать вторую).
 - **Точка настройки:** без сохранённого Wi-Fi или после удержания кнопки 5–10 с плата на
   10 минут поднимает точку доступа `OpenTherm-XXXX` (пароль — пароль веб-интерфейса,
   `.\build.ps1 webpass`). Веб-интерфейс — `http://192.168.4.1:8080/`. На это время
@@ -170,7 +172,7 @@ ThingsBoard), на несколько — объект. Проверять уд�
 Консоль на COM5: `status`, `heat on|off`, `set 21.5`, `mode auto`, `limits 5 30`,
 `sched` / `sched set 1 1 06:30 21.5` / `sched hex`, `time <UTC epoch>`, `sensor`, `sensor pull auto|on|off`,
 `ot log on`, `ot raw 0 25 0`, `led` (тест цветов), `wdt stall boiler` (тест watchdog),
-`wifi <сеть> [пароль]` / `wifi setup`, `tb` / `tb host <сервер> [порт]` / `tb token <токен>`,
+`wifi <сеть> [пароль]` / `wifi2 <сеть> [пароль]` / `wifi2 -` / `wifi setup`, `tb` / `tb host <сервер> [порт]` / `tb token <токен>`,
 `tb pass <пароль>` (свой брокер, [docs/mosquitto.md](docs/mosquitto.md); `-` — убрать),
 `tz 180`, `report` (отправить всё в ThingsBoard заново), `factory`.
 Те же команды доступны по сети: `POST /cli` (`.\build.ps1 cmd`) и RPC `cli` из ThingsBoard;

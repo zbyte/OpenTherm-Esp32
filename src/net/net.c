@@ -5,6 +5,10 @@
  * TuyaOpen's Wi-Fi layer runs either station or access point, not both, so
  * setup mode drops the station link until it ends. All Wi-Fi calls are made
  * from the net task; the event callback and the public setters only set flags.
+ *
+ * Up to two networks: a failed attempt (an absent network fails within
+ * seconds) moves on to the other one, the backoff grows only after both
+ * failed. The board stays on whichever network it got until that link drops.
  */
 
 #include "net.h"
@@ -23,12 +27,13 @@
 #include "ota_secret.h" /* WEB_PASSWORD doubles as the setup AP password */
 #endif
 
-#define KV_KEY        "netinfo"
+#define NETS          2
 #define TICK_MS       500
 #define CONNECT_MS    30000 /* no answer from the driver: try again */
 #define SETUP_MS      (10 * 60 * 1000)
 #define BACKOFF_MIN_MS 5000
 #define BACKOFF_MAX_MS 60000
+#define SWITCH_MS     1000 /* pause before trying the other network */
 #define SETUP_IP      "192.168.4.1"
 #define NTP_SERVER    "pool.ntp.org"
 #define CORE          0
@@ -42,9 +47,17 @@ typedef enum {
     ST_SETUP,
 } state_e;
 
+typedef struct {
+    char ssid[33]; /* "" = not configured */
+    char pass[65];
+} wifi_net_t;
+
+/* KV "netinfo" is the first network for compatibility with older firmware */
+static const char *const KV_KEYS[NETS] = {"netinfo", "netinfo2"};
+
 static volatile state_e s_state;
-static char             s_ssid[33];
-static char             s_pass[65];
+static wifi_net_t       s_net[NETS];
+static volatile uint8_t s_cur; /* network being tried or in use */
 static MUTEX_HANDLE     s_lock;
 
 /* requests to the net task */
@@ -57,12 +70,12 @@ static volatile bool s_ev_up;
 static volatile bool s_ev_fail;
 static volatile bool s_ev_lost;
 
-static bool load_creds(void)
+static bool load_creds(uint8_t i)
 {
     uint8_t *buf = NULL;
     size_t   len = 0;
     bool     ok  = false;
-    if (tal_kv_get(KV_KEY, &buf, &len) != OPRT_OK) {
+    if (tal_kv_get(KV_KEYS[i], &buf, &len) != OPRT_OK) {
         return false;
     }
     char *json = tal_malloc(len + 1);
@@ -72,8 +85,8 @@ static bool load_creds(void)
         cJSON *root = cJSON_Parse(json);
         cJSON *s = cJSON_GetObjectItem(root, "s"), *p = cJSON_GetObjectItem(root, "p");
         if (cJSON_IsString(s) && s->valuestring[0] && cJSON_IsString(p)) {
-            snprintf(s_ssid, sizeof(s_ssid), "%s", s->valuestring);
-            snprintf(s_pass, sizeof(s_pass), "%s", p->valuestring);
+            snprintf(s_net[i].ssid, sizeof(s_net[i].ssid), "%s", s->valuestring);
+            snprintf(s_net[i].pass, sizeof(s_net[i].pass), "%s", p->valuestring);
             ok = true;
         }
         cJSON_Delete(root);
@@ -94,17 +107,41 @@ static void on_wifi_event(WF_EVENT_E event, void *arg)
     }
 }
 
+static bool have_creds(void)
+{
+    for (uint8_t i = 0; i < NETS; i++) {
+        if (s_net[i].ssid[0]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The next configured network after s_cur (s_cur itself if it is the only one). */
+static uint8_t next_net(void)
+{
+    for (uint8_t k = 1; k <= NETS; k++) {
+        uint8_t i = (uint8_t)((s_cur + k) % NETS);
+        if (s_net[i].ssid[0]) {
+            return i;
+        }
+    }
+    return s_cur;
+}
+
 static void connect_now(void)
 {
-    char ssid[33], pass[65];
+    if (!s_net[s_cur].ssid[0]) {
+        s_cur = next_net();
+    }
+    wifi_net_t n;
     tal_mutex_lock(s_lock);
-    memcpy(ssid, s_ssid, sizeof(ssid));
-    memcpy(pass, s_pass, sizeof(pass));
+    n = s_net[s_cur];
     tal_mutex_unlock(s_lock);
 
     s_ev_up = s_ev_fail = s_ev_lost = false;
-    PR_NOTICE("net: connecting to \"%s\"", ssid);
-    tal_wifi_station_connect((int8_t *)ssid, (int8_t *)pass);
+    PR_NOTICE("net: connecting to \"%s\"", n.ssid);
+    tal_wifi_station_connect((int8_t *)n.ssid, (int8_t *)n.pass);
     s_state = ST_CONNECTING;
 }
 
@@ -151,9 +188,12 @@ static void net_task(void *arg)
 {
     uint32_t since = tal_system_get_millisecond(); /* entered the current state */
     uint32_t backoff = BACKOFF_MIN_MS;
+    uint32_t wait    = BACKOFF_MIN_MS; /* in ST_DOWN */
+    uint8_t  first   = 0;              /* where the current round of attempts began */
 
-    if (s_ssid[0]) {
+    if (have_creds()) {
         connect_now();
+        first = s_cur;
     } else {
         PR_WARN("net: no Wi-Fi credentials");
         start_setup();
@@ -175,6 +215,7 @@ static void net_task(void *arg)
             }
             backoff = BACKOFF_MIN_MS;
             connect_now();
+            first = s_cur;
         }
 
         switch (s_state) {
@@ -184,16 +225,24 @@ static void net_task(void *arg)
                 s_ev_up = false;
                 s_state = ST_UP;
                 backoff = BACKOFF_MIN_MS;
+                first   = s_cur; /* after a drop, this network is tried first */
                 char ip[16] = "?";
                 sys_port_sta_ip(ip, sizeof(ip));
                 PR_NOTICE("net: up, ip %s", ip);
                 sys_port_wifi_ps_off();
                 sntp_port_start(NTP_SERVER, on_ntp);
             } else if (s_state == ST_CONNECTING && (s_ev_fail || now - since > CONNECT_MS)) {
-                PR_WARN("net: connect failed, retry in %u s", (unsigned)(backoff / 1000));
+                s_cur = next_net();
+                if (s_cur != first) {
+                    wait = SWITCH_MS;
+                    PR_WARN("net: connect failed, trying \"%s\"", s_net[s_cur].ssid);
+                } else {
+                    wait    = backoff;
+                    backoff = backoff * 2 > BACKOFF_MAX_MS ? BACKOFF_MAX_MS : backoff * 2;
+                    PR_WARN("net: connect failed, retry in %u s", (unsigned)(wait / 1000));
+                }
                 s_state = ST_DOWN;
-            } else if (s_state == ST_DOWN && now - since >= backoff) {
-                backoff = backoff * 2 > BACKOFF_MAX_MS ? BACKOFF_MAX_MS : backoff * 2;
+            } else if (s_state == ST_DOWN && now - since >= wait) {
                 connect_now();
             }
             break;
@@ -201,14 +250,15 @@ static void net_task(void *arg)
             if (s_ev_lost || s_ev_fail) {
                 PR_WARN("net: link lost");
                 s_state = ST_DOWN;
-                backoff = BACKOFF_MIN_MS;
+                wait = backoff = BACKOFF_MIN_MS;
             }
             break;
         case ST_SETUP:
-            if (s_ssid[0] && now - since >= SETUP_MS) {
+            if (have_creds() && now - since >= SETUP_MS) {
                 PR_NOTICE("net: setup time over");
                 tal_wifi_ap_stop();
                 connect_now();
+                first = s_cur;
             }
             break;
         default:
@@ -227,8 +277,10 @@ static void net_task(void *arg)
 void net_init(void)
 {
     tal_mutex_create_init(&s_lock);
-    if (load_creds()) {
-        PR_NOTICE("net: Wi-Fi \"%s\"", s_ssid);
+    for (uint8_t i = 0; i < NETS; i++) {
+        if (load_creds(i)) {
+            PR_NOTICE("net: Wi-Fi %u \"%s\"", i + 1, s_net[i].ssid);
+        }
     }
     if (tal_wifi_init(on_wifi_event) != OPRT_OK) {
         PR_ERR("net: Wi-Fi init failed");
@@ -254,28 +306,46 @@ void net_setup_start(void)
     s_req_setup = true;
 }
 
-bool net_set_wifi(const char *ssid, const char *password)
+bool net_set_wifi(uint8_t n, const char *ssid, const char *password)
 {
-    if (!ssid || !ssid[0] || strlen(ssid) >= sizeof(s_ssid) || !password || strlen(password) >= sizeof(s_pass)) {
+    if (n >= NETS || !ssid || strlen(ssid) >= sizeof(s_net[0].ssid) || !password ||
+        strlen(password) >= sizeof(s_net[0].pass) || (!ssid[0] && n == 0)) {
         return false;
     }
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "s", ssid);
-    cJSON_AddStringToObject(root, "p", password);
-    char *json = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    bool ok = json && tal_kv_set(KV_KEY, (const uint8_t *)json, strlen(json)) == OPRT_OK;
-    cJSON_free(json);
+    bool ok = true;
+    if (ssid[0]) {
+        cJSON *root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root, "s", ssid);
+        cJSON_AddStringToObject(root, "p", password);
+        char *json = cJSON_PrintUnformatted(root);
+        cJSON_Delete(root);
+        ok = json && tal_kv_set(KV_KEYS[n], (const uint8_t *)json, strlen(json)) == OPRT_OK;
+        cJSON_free(json);
+    } else {
+        tal_kv_del(KV_KEYS[n]); /* already absent is fine */
+    }
     if (!ok) {
         PR_ERR("net: saving Wi-Fi credentials failed");
         return false;
     }
 
     tal_mutex_lock(s_lock);
-    snprintf(s_ssid, sizeof(s_ssid), "%s", ssid);
-    snprintf(s_pass, sizeof(s_pass), "%s", password);
+    snprintf(s_net[n].ssid, sizeof(s_net[n].ssid), "%s", ssid);
+    snprintf(s_net[n].pass, sizeof(s_net[n].pass), "%s", password);
     tal_mutex_unlock(s_lock);
-    PR_NOTICE("net: Wi-Fi set to \"%s\"", ssid);
+
+    if (!ssid[0]) {
+        PR_NOTICE("net: Wi-Fi %u removed", n + 1);
+    } else {
+        PR_NOTICE("net: Wi-Fi %u set to \"%s\"", n + 1, ssid);
+    }
+    /* a working link over the other network stays */
+    if (s_state == ST_UP && n != s_cur) {
+        return true;
+    }
+    if (ssid[0]) {
+        s_cur = n; /* try the new one first */
+    }
     s_req_reconnect = true;
     return true;
 }
@@ -283,7 +353,14 @@ bool net_set_wifi(const char *ssid, const char *password)
 void net_get_ssid(char *out, size_t cap)
 {
     tal_mutex_lock(s_lock);
-    snprintf(out, cap, "%s", s_ssid);
+    snprintf(out, cap, "%s", s_net[s_cur].ssid);
+    tal_mutex_unlock(s_lock);
+}
+
+void net_get_wifi(uint8_t n, char *out, size_t cap)
+{
+    tal_mutex_lock(s_lock);
+    snprintf(out, cap, "%s", n < NETS ? s_net[n].ssid : "");
     tal_mutex_unlock(s_lock);
 }
 

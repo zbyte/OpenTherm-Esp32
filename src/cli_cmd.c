@@ -317,14 +317,23 @@ static void cmd_wifi(int argc, char *argv[])
         net_setup_start();
         return;
     }
-    /* an open network has no password */
-    if ((argc == 2 || argc == 3) && net_set_wifi(argv[1], argc == 3 ? argv[2] : "")) {
+    /* an open network has no password; "wifi2 -" removes the second network */
+    uint8_t n = !strcmp(argv[0], "wifi2") ? 1 : 0;
+    if (n == 1 && argc == 2 && !strcmp(argv[1], "-")) {
+        net_set_wifi(1, "", "");
         return;
     }
-    char ssid[33];
+    if ((argc == 2 || argc == 3) && net_set_wifi(n, argv[1], argc == 3 ? argv[2] : "")) {
+        return;
+    }
+    char ssid[33], w1[33], w2[33];
     net_get_ssid(ssid, sizeof(ssid));
-    PR_NOTICE("wifi: %s up=%d setup_ap=%d", ssid[0] ? ssid : "-", net_is_up(), net_setup_active());
-    PR_INFO("usage: wifi <ssid> [password] | wifi setup  (names with spaces: use the web UI)");
+    net_get_wifi(0, w1, sizeof(w1));
+    net_get_wifi(1, w2, sizeof(w2));
+    PR_NOTICE("wifi: 1=%s 2=%s current=%s up=%d setup_ap=%d", w1[0] ? w1 : "-", w2[0] ? w2 : "-",
+              ssid[0] ? ssid : "-", net_is_up(), net_setup_active());
+    PR_INFO("usage: wifi <ssid> [password] | wifi2 <ssid> [password] | wifi2 - | wifi setup  "
+            "(names with spaces: use the web UI)");
 }
 
 static void cmd_tb(int argc, char *argv[])
@@ -391,6 +400,7 @@ static cli_cmd_t s_cli_cmd[] = {
     {.name = "energy", .func = cmd_energy, .help = "energy [reset]: estimated power/energy"},
     {.name = "tz", .func = cmd_tz, .help = "tz [minutes]: time zone"},
     {.name = "wifi", .func = cmd_wifi, .help = "wifi <ssid> [password] | wifi setup"},
+    {.name = "wifi2", .func = cmd_wifi, .help = "wifi2 <ssid> [password] | wifi2 -: second network"},
     {.name = "tb", .func = cmd_tb, .help = "ThingsBoard server and token"},
     {.name = "report", .func = cmd_report, .help = "send everything to ThingsBoard again"},
     {.name = "factory", .func = cmd_factory, .help = "reset heating settings to defaults"},
@@ -414,7 +424,7 @@ int app_cli_exec(const char *line)
     if (argc == 0) {
         return -1;
     }
-    bool secret = (!strcmp(argv[0], "wifi") && argc > 2) ||
+    bool secret = (!strncmp(argv[0], "wifi", 4) && argc > 2) ||
                   (!strcmp(argv[0], "tb") && argc > 1 && (!strcmp(argv[1], "token") || !strcmp(argv[1], "pass")));
     for (size_t i = 0; i < sizeof(s_cli_cmd) / sizeof(s_cli_cmd[0]); i++) {
         if (!strcmp(argv[0], s_cli_cmd[i].name)) {
