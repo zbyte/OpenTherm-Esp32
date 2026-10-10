@@ -14,6 +14,10 @@
  * the keepalive gives up a minute later). So chunks are small, a lost one is
  * asked again after RETRY_MS, and with no answer by STUCK_MS the connection is
  * dropped and made anew; the download resumes at the same chunk.
+ *
+ * A package older than the running firmware is not installed: a build put on
+ * the board over the LAN stays there until a newer package is assigned. To go
+ * back, upload the old image under a higher version.
  */
 
 #include "fw_update.h"
@@ -206,6 +210,24 @@ static void finish(void)
 }
 
 /* Decides what to do with the announced package; caller holds the lock. */
+/* Compares dotted versions number by number ("1.2.10" > "1.2.9", "1.2" == "1.2.0"). */
+static int version_cmp(const char *a, const char *b)
+{
+    for (;;) {
+        char         *ea, *eb;
+        unsigned long na = strtoul(a, &ea, 10), nb = strtoul(b, &eb, 10);
+        if (na != nb) {
+            return na < nb ? -1 : 1;
+        }
+        bool more_a = *ea == '.', more_b = *eb == '.';
+        if (!more_a && !more_b) {
+            return strcmp(ea, eb); /* a suffix like "-rc1", or both ended */
+        }
+        a = more_a ? ea + 1 : ea;
+        b = more_b ? eb + 1 : eb;
+    }
+}
+
 static void consider(void)
 {
     if (strcmp(s_target.title, PROJECT_NAME) != 0) {
@@ -220,7 +242,18 @@ static void consider(void)
         snprintf(s_status, sizeof(s_status), "up to date (%s)", PROJECT_VERSION);
         if (s_try.installing && !strcmp(s_try.v, PROJECT_VERSION)) {
             report_once(PROJECT_VERSION, "UPDATED", NULL);
+            s_try.installing = false;
+            try_save();
         }
+        return;
+    }
+    if (version_cmp(s_target.version, PROJECT_VERSION) < 0) {
+        if (s_phase == FW_DOWNLOADING) {
+            fw_port_abort();
+            s_phase = FW_IDLE;
+        }
+        snprintf(s_status, sizeof(s_status), "assigned %s is older than %s, not installed", s_target.version,
+                 PROJECT_VERSION);
         return;
     }
     if (s_phase != FW_IDLE) {
@@ -246,11 +279,14 @@ void fw_update_init(void)
     tal_mutex_create_init(&s_lock);
     try_load();
     if (s_try.installing && strcmp(s_try.v, PROJECT_VERSION) != 0) {
-        /* restarted into s_try.v, yet the old image runs: it was rolled back */
-        snprintf(s_boot_error, sizeof(s_boot_error), "%s rolled back to %s", s_try.v, PROJECT_VERSION);
-        PR_WARN("fw: %s", s_boot_error);
+        if (version_cmp(PROJECT_VERSION, s_try.v) < 0) {
+            /* restarted into s_try.v, yet the old image runs: it was rolled back */
+            snprintf(s_boot_error, sizeof(s_boot_error), "%s rolled back to %s", s_try.v, PROJECT_VERSION);
+            PR_WARN("fw: %s", s_boot_error);
+            s_try.bad = true;
+        }
+        /* a newer one runs: put on over the LAN since, nothing went wrong */
         s_try.installing = false;
-        s_try.bad        = true;
         try_save();
     }
     s_req = tal_system_get_random(1000);
