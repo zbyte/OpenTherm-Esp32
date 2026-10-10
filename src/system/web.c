@@ -215,10 +215,17 @@ size_t web_page(char *buf, size_t cap)
     row(&o, "Прошивка");
     put(&o, "%s (%s)</td></tr>", PROJECT_VERSION, sys_port_running_partition());
     row(&o, "Время");
-    if (tv) {
-        put(&o, "%s %02u:%02u</td></tr>", s_day_ru[wd], mn / 60, mn % 60);
+    char     now[24];
+    uint32_t age;
+    if (tv && clock_format(now, sizeof(now))) {
+        put(&o, "%s %s", s_day_ru[wd], now);
     } else {
-        put(&o, "неизвестно</td></tr>");
+        put(&o, "неизвестно");
+    }
+    if (clock_sync_age(&age)) {
+        put(&o, ", NTP: %u мин назад</td></tr>", (unsigned)(age / 60));
+    } else {
+        put(&o, ", NTP ещё не ответил</td></tr>");
     }
     row(&o, "ThingsBoard");
     put(&o, "%s</td></tr>", cloud_is_online() ? "на связи" : "нет связи");

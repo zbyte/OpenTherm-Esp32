@@ -67,6 +67,7 @@
 #define TELE_CHECK_MS 2000
 #define TELE_FULL_MS  (10 * 60 * 1000)
 #define ENERGY_MIN_MS 60000
+#define CLOCK_MS      60000 /* the board's wall clock, to spot a wrong time */
 #define CLI_OUT_MAX   1500
 
 #define TOPIC_TELE "v1/devices/me/telemetry"
@@ -384,7 +385,8 @@ typedef struct {
 
 static tval_t   s_sent[K_COUNT];
 static bool     s_sent_ok[K_COUNT];
-static uint32_t s_last_full, s_last_check, s_energy_ms;
+static uint32_t s_last_full, s_last_check, s_energy_ms, s_clock_ms;
+static bool     s_clock_sent;
 
 static void collect(tval_t *t)
 {
@@ -501,11 +503,27 @@ static void send_telemetry(bool force)
             sent[n++] = (uint8_t)k;
         }
     }
+    /* local time as the board sees it, and minutes since the last NTP answer */
+    bool clock_due = full || !s_clock_sent || now - s_clock_ms >= CLOCK_MS;
+    if (clock_due) {
+        char     t[24];
+        uint32_t age;
+        jkey(&o, "clock");
+        jstr(&o, clock_format(t, sizeof(t)) ? t : "неизвестно");
+        if (clock_sync_age(&age)) {
+            jkey(&o, "ntp_age");
+            jput(&o, "%u", (unsigned)(age / 60));
+        }
+    }
     jput(&o, "}");
-    if (!n) {
+    if (!n && !clock_due) {
         return;
     }
     if (mqtt_port_publish(TOPIC_TELE, buf, (int)o.len, 1) == OT_PORT_OK) {
+        if (clock_due) {
+            s_clock_ms   = now;
+            s_clock_sent = true;
+        }
         for (int i = 0; i < n; i++) {
             s_sent[sent[i]]    = cur[sent[i]];
             s_sent_ok[sent[i]] = true;

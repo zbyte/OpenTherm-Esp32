@@ -180,10 +180,17 @@ static void cmd_time(int argc, char *argv[])
     }
     uint8_t  wd;
     uint16_t mn;
-    if (clock_now(&wd, &mn)) {
-        PR_NOTICE("local time: day %d %02d:%02d", wd + 1, mn / 60, mn % 60);
+    char     t[24];
+    uint32_t age;
+    if (clock_now(&wd, &mn) && clock_format(t, sizeof(t))) {
+        PR_NOTICE("local time: %s, day %d", t, wd + 1);
     } else {
         PR_NOTICE("time unknown; set with: time <UTC epoch seconds>");
+    }
+    if (clock_sync_age(&age)) {
+        PR_NOTICE("ntp: last sync %u s ago", (unsigned)age);
+    } else {
+        PR_NOTICE("ntp: no answer yet");
     }
 }
 
