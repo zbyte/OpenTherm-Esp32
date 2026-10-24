@@ -167,6 +167,12 @@ static void step(float dt_s)
 
     int16_t flow_x10 = (int16_t)(flow * 10.0f);
     boiler_set_demand(demand, flow_x10);
+    {
+        uint8_t rs = boiler_room_sensor();
+        int16_t rv = 0;
+        bool    ok = rs && sensors_get((uint8_t)(rs - 1), &rv);
+        boiler_set_room(ok, rv);
+    }
 
     boiler_status_t b;
     boiler_get_status(&b);

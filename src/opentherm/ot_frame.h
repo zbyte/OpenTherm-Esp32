@@ -28,12 +28,15 @@ typedef enum {
 enum {
     OT_ID_STATUS        = 0,  /* HB master flags, LB slave flags */
     OT_ID_TSET          = 1,  /* control setpoint, f8.8 degC */
+    OT_ID_MASTER_CONFIG = 2,  /* HB master flags, LB master member id */
     OT_ID_SLAVE_CONFIG  = 3,  /* HB slave flags, LB member id */
     OT_ID_ASF_FLAGS     = 5,  /* HB application-specific fault flags, LB OEM fault code */
     OT_ID_MAX_REL_MOD   = 14, /* max relative modulation, f8.8 % */
+    OT_ID_TROOM         = 24, /* room temperature, f8.8 degC (master writes) */
     OT_ID_REL_MOD       = 17, /* relative modulation level, f8.8 % */
     OT_ID_TBOILER       = 25, /* flow temperature, f8.8 degC */
     OT_ID_TRET          = 28, /* return temperature, f8.8 degC */
+    OT_ID_TSET_BOUNDS   = 49, /* HB upper, LB lower bound of max CH setpoint, degC */
     OT_ID_MAX_TSET      = 57, /* max CH setpoint, f8.8 degC */
     OT_ID_OT_VERSION_S  = 125,
     OT_ID_OEM_DIAG      = 115,

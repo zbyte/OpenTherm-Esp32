@@ -11,6 +11,9 @@
 #   .\build.ps1 cmd "status"   run a console command on the board over Wi-Fi, show the new log
 #   .\build.ps1 rlog           the board log over Wi-Fi
 #   .\build.ps1 webpass        web UI address and login (http://<board>:8080/, user admin)
+# Every build also writes dist/<project>_<ver>/..._UG_<ver>.bin.zlib: the image
+# zlib-compressed, the package to upload to ThingsBoard (a third less traffic;
+# firmware from 1.2.12 on unpacks it, older firmware needs the plain .bin).
 param([string]$Action = "build", [string]$Port = "COM5", [int]$Seconds = 20)
 
 # No "Stop" here: PowerShell 5.1 turns native stderr (tos.py logs) into errors.
@@ -150,10 +153,20 @@ function Invoke-LanOta([string]$Ip) {
     return 0
 }
 
+# ThingsBoard package: the newest dist image, zlib-compressed next to it.
+function New-OtaPackage {
+    $bin = Get-ChildItem (Join-Path $Project "dist") -Recurse -Filter "*_UG_*.bin" |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($bin) { & $IdfPython (Join-Path $Project "tools\zpack.py") $bin.FullName }
+}
+
 Set-Location $Project
 switch ($Action) {
     "clean" { tos.py clean -f }
-    "build" { tos.py build }
+    "build" {
+        tos.py build
+        if ($LASTEXITCODE -eq 0) { New-OtaPackage }
+    }
     "flash" {
         tos.py build
         if ($LASTEXITCODE -eq 0) { exit (Invoke-Flash) }

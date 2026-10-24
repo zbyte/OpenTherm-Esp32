@@ -5,8 +5,12 @@
  * Receiver: edge interrupt + esp_timer timestamps, state machine after
  * ihormelnyk/opentherm_library: an edge more than 750 us after the previous
  * mid-bit edge is itself a mid-bit edge and carries the bit value.
- * Transmitter: busy-wait against absolute esp_timer deadlines (no drift);
- * the calling task is expected to run on the protocol core at high priority.
+ * Transmitter: the RMT peripheral plays the whole frame (34 Manchester bits
+ * fit its 48-symbol memory, no refills). A software loop stalls whenever a
+ * flash write freezes the cores (KV saves, firmware download): the frame then
+ * went out broken and a BAXI Ampera took such garbage for writes to its
+ * service parameters (power limit 5.0 -> 0, pump 11.0 -> 3). The busy-wait
+ * loop is kept for the loopback emulator and as a fallback.
  */
 
 #include "ot_port.h"
@@ -14,10 +18,13 @@
 #include <string.h>
 
 #include "driver/gpio.h"
+#include "driver/rmt_tx.h"
 #include "esp_attr.h"
 #include "esp_rom_sys.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "hal/gpio_ll.h"
+#include "soc/soc_caps.h"
 #include "soc/gpio_struct.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -52,6 +59,11 @@ static bool          s_inited;
 static rx_ctx_t      s_master_rx; /* master listens on cfg.rx_gpio */
 static rx_ctx_t      s_emu_rx;    /* emulator listens on cfg.tx_gpio */
 static int64_t       s_last_frame_end;
+static volatile uint32_t s_rx_edges; /* master RX, diagnostics */
+
+static rmt_channel_handle_t s_tx_chan; /* NULL: software transmitter */
+static rmt_encoder_handle_t s_tx_enc;
+static SemaphoreHandle_t    s_tx_lock; /* held while a frame is on the line */
 
 static ot_port_emu_handler_t s_emu_handler;
 static uint32_t              s_emu_delay_ms;
@@ -60,9 +72,12 @@ static volatile bool         s_emu_run;
 
 /* ---------------------------------------------------------------- levels */
 
+/* Called from the RX interrupt, which also runs while a flash write has the
+ * cache disabled: gpio_get_level() lives in flash and hung the core there
+ * (interrupt watchdog) whenever the boiler answered during a KV save. */
 static inline bool IRAM_ATTR pin_is_active(int gpio, bool active_low)
 {
-    return gpio_get_level(gpio) != (active_low ? 1 : 0);
+    return gpio_ll_get_level(&GPIO, gpio) != (active_low ? 1 : 0);
 }
 
 static inline void set_active(int gpio, bool active_low, bool active)
@@ -78,6 +93,10 @@ static void IRAM_ATTR rx_isr(void *arg)
     int64_t   now    = esp_timer_get_time();
     bool      active = pin_is_active(rx->gpio, rx->active_low);
     BaseType_t woken = pdFALSE;
+
+    if (rx == &s_master_rx) {
+        s_rx_edges = s_rx_edges + 1;
+    }
 
     switch (rx->state) {
     case RX_WAIT_START:
@@ -173,6 +192,58 @@ static void tx_frame(int gpio, bool active_low, uint32_t frame)
     set_active(gpio, active_low, false);
 }
 
+static int tx_rmt_init(int gpio, bool active_low)
+{
+    rmt_tx_channel_config_t ch = {
+        .gpio_num          = gpio,
+        .clk_src           = RMT_CLK_SRC_DEFAULT,
+        .resolution_hz     = 1000000, /* 1 us ticks */
+        .mem_block_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL,
+        .trans_queue_depth = 1,
+        .flags =
+            {
+                .invert_out   = active_low,
+                .io_loop_back = true, /* the loopback emulator listens on this pad */
+            },
+    };
+    rmt_copy_encoder_config_t enc = {};
+    if (rmt_new_tx_channel(&ch, &s_tx_chan) != ESP_OK) {
+        s_tx_chan = NULL;
+        return OT_PORT_ERR;
+    }
+    if (rmt_new_copy_encoder(&enc, &s_tx_enc) != ESP_OK || rmt_enable(s_tx_chan) != ESP_OK) {
+        rmt_del_channel(s_tx_chan);
+        s_tx_chan = NULL;
+        return OT_PORT_ERR;
+    }
+    return OT_PORT_OK;
+}
+
+static int tx_frame_rmt(uint32_t frame)
+{
+    static rmt_symbol_word_t sym[34]; /* must stay valid until the frame is out */
+    for (int i = 0; i < 34; i++) {
+        bool bit = (i == 0 || i == 33) ? true : ((frame >> (31 - (i - 1))) & 1u);
+        sym[i]   = (rmt_symbol_word_t){
+              .duration0 = HALF_BIT_US, .level0 = bit, .duration1 = HALF_BIT_US, .level1 = !bit};
+    }
+    rmt_transmit_config_t tc = {.loop_count = 0, .flags.eot_level = 0};
+    if (rmt_transmit(s_tx_chan, s_tx_enc, sym, sizeof(sym), &tc) != ESP_OK) {
+        return OT_PORT_ERR;
+    }
+    /* 34 ms on the line; the done interrupt may come late during a flash write */
+    return rmt_tx_wait_all_done(s_tx_chan, 500) == ESP_OK ? OT_PORT_OK : OT_PORT_ERR;
+}
+
+/* Before any restart: let the frame on the line finish and start no other,
+ * a cut frame is garbage to the boiler. */
+static void ot_shutdown(void)
+{
+    if (s_tx_lock) {
+        xSemaphoreTake(s_tx_lock, pdMS_TO_TICKS(600));
+    }
+}
+
 /* --------------------------------------------------------------- master */
 
 static int rx_setup(rx_ctx_t *rx, int gpio, bool active_low)
@@ -222,6 +293,12 @@ int ot_port_init(const ot_port_cfg_t *cfg)
         return OT_PORT_ERR;
     }
 
+    s_tx_lock = xSemaphoreCreateMutex();
+    if (tx_rmt_init(cfg->tx_gpio, cfg->tx_active_low) != OT_PORT_OK) {
+        esp_rom_printf("ot_port: RMT transmitter unavailable, software timing\n");
+    }
+    esp_register_shutdown_handler(ot_shutdown);
+
     s_inited = true;
     return OT_PORT_OK;
 }
@@ -237,11 +314,33 @@ int ot_port_transceive(uint32_t request, uint32_t *response, uint32_t timeout_ms
         vTaskDelay(pdMS_TO_TICKS(gap / 1000 + 1));
     }
 
+    xSemaphoreTake(s_tx_lock, portMAX_DELAY);
     rx_arm(&s_master_rx);
-    tx_frame(s_cfg.tx_gpio, s_cfg.tx_active_low, request);
+    int tx = OT_PORT_OK;
+    if (s_tx_chan) {
+        tx = tx_frame_rmt(request);
+    } else {
+        tx_frame(s_cfg.tx_gpio, s_cfg.tx_active_low, request);
+    }
+    xSemaphoreGive(s_tx_lock);
+    if (tx != OT_PORT_OK) {
+        s_master_rx.state = RX_IDLE;
+        s_last_frame_end  = esp_timer_get_time();
+        return OT_PORT_ERR;
+    }
     int rc = rx_wait(&s_master_rx, timeout_ms, response);
     s_last_frame_end = esp_timer_get_time();
     return rc;
+}
+
+uint32_t ot_port_rx_edges(void)
+{
+    return s_rx_edges;
+}
+
+bool ot_port_rx_active(void)
+{
+    return s_inited && pin_is_active(s_cfg.rx_gpio, s_cfg.rx_active_low);
 }
 
 /* ------------------------------------------------------------- emulator */

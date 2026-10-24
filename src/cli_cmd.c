@@ -59,9 +59,10 @@ static void cmd_status(int argc, char *argv[])
     PR_NOTICE("control:  room=%d%s target=%d (%s) demand=%d flow_set=%d I=%d faults=0x%x state=%s", r.room_x10,
               r.sensor_ok ? "" : "(NO SENSOR)", r.target_x10, r.target_src ? r.target_src : "-", r.demand,
               r.flow_set_x10, r.integral_x10, r.faults, s_work[r.work_state]);
-    PR_NOTICE("boiler:   comm=%d err=%u ch_cmd=%d tset=%d | fault=%d ch=%d flame=%d flow=%d%s mod=%d%s asf=0x%02x "
-              "oem=%u",
-              b.comm_ok, b.comm_errors, b.ch_enable_cmd, b.tset_x10_cmd, b.fault, b.ch_active, b.flame, b.flow_x10,
+    PR_NOTICE("boiler:   comm=%d err=%u ch_cmd=%d dhw_cmd=%d tset=%d%s | fault=%d ch=%d dhw=%d flame=%d flow=%d%s mod=%d%s "
+              "asf=0x%02x oem=%u",
+              b.comm_ok, b.comm_errors, b.ch_enable_cmd, b.dhw_enable_cmd, b.tset_x10_cmd, b.tset_ok ? "" : "(rejected)",
+              b.fault, b.ch_active, b.dhw_active, b.flame, b.flow_x10,
               b.flow_valid ? "" : "?", b.rel_mod_x10, b.mod_valid ? "" : "?", b.asf_flags, b.oem_fault);
     char   ip[16] = "-", ssid[33];
     int8_t rssi   = 0;
@@ -234,6 +235,35 @@ static void cmd_ot(int argc, char *argv[])
         boiler_set_trace(!strcmp(argv[2], "on"));
         return;
     }
+    if (argc == 2 && !strcmp(argv[1], "stats")) {
+        boiler_bus_stats_t s;
+        boiler_get_bus_stats(&s);
+        PR_NOTICE("ot stats: exchanges %u, timeouts %u, framing %u, parity %u, echo %u; last bad: %s",
+                  (unsigned)s.total, (unsigned)s.timeouts, (unsigned)s.framing, (unsigned)s.parity,
+                  (unsigned)s.echo, s.last_bad[0] ? s.last_bad : "-");
+        return;
+    }
+    if (argc == 3 && !strcmp(argv[1], "room")) {
+        int slot = atoi(argv[2]);
+        boiler_set_room_sensor(slot >= 0 && slot <= SENSOR_SLOTS ? (uint8_t)slot : 0);
+        return;
+    }
+    if (argc == 3 && !strcmp(argv[1], "dhw")) {
+        boiler_set_dhw(!strcmp(argv[2], "on"));
+        return;
+    }
+    if (argc == 2 && !strcmp(argv[1], "line")) {
+        /* passive: samples the RX pin for 1 s while the master keeps polling */
+        uint32_t e0 = ot_port_rx_edges(), active = 0;
+        for (int i = 0; i < 200; i++) {
+            active += ot_port_rx_active();
+            tal_system_sleep(5);
+        }
+        PR_NOTICE("ot line: rx active (boiler high current) %u ms of 1000, now %s; edges %u in 1 s, %u since boot",
+                  (unsigned)(active * 5), ot_port_rx_active() ? "active" : "idle",
+                  (unsigned)(ot_port_rx_edges() - e0), (unsigned)ot_port_rx_edges());
+        return;
+    }
     if (argc == 5 && !strcmp(argv[1], "raw")) {
         uint32_t resp = 0;
         int rc = boiler_raw((uint8_t)atoi(argv[2]), (uint8_t)atoi(argv[3]), (uint16_t)strtoul(argv[4], NULL, 16),
@@ -242,7 +272,7 @@ static void cmd_ot(int argc, char *argv[])
                   ot_frame_id(resp), ot_frame_value(resp));
         return;
     }
-    PR_INFO("usage: ot log <on|off> | ot raw <type 0=read 1=write> <id> <hex value>");
+    PR_INFO("usage: ot log <on|off> | ot stats | ot dhw <on|off> | ot room <0-4> | ot line | ot raw <type 0=read 1=write> <id> <hex value>");
 }
 
 static void cmd_sim(int argc, char *argv[])

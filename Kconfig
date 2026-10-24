@@ -72,6 +72,32 @@ config OT_RX_ACTIVE_LOW
     ---help---
         ihormelnyk-style adapters: RX active = HIGH.
 
+config OT_MASTER_MEMBER_ID
+    int "OpenTherm master member ID sent in ID2"
+    range 0 255
+    default 4
+    ---help---
+        BAXI Ampera (electric) answers DATA_INVALID to the control setpoint
+        (ID1) and ignores heating commands unless the master introduces
+        itself with member ID 4 (as in OTGateway). Standard value: 0.
+
+config OT_ROOM_SENSOR
+    int "Sensor slot sent to the boiler as room temperature (ID24), 0 = none"
+    range 0 4
+    default 2
+    ---help---
+        BAXI Ampera can use the thermostat's room temperature as its own
+        room sensor. Changed at run time with ot room / set_ot_room.
+
+config OT_MASTER_DHW_ENABLE_BIT
+    bool "Set DHW enable in the master status (ID0) after boot"
+    default n
+    ---help---
+        Most OpenTherm masters (Tasmota, OTGateway, OldNavi) send DHW
+        enable together with CH enable. BAXI Ampera with a hot water tank
+        then switches its 3-way valve to the tank and heats it, even with
+        heating off. Changed at run time with ot dhw / set_dhw.
+
 endmenu
 
 menu "Opentherm heating control"

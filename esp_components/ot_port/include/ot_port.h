@@ -40,6 +40,11 @@ int ot_port_init(const ot_port_cfg_t *cfg);
 /* Sends a request frame and waits for the response frame. Blocking. */
 int ot_port_transceive(uint32_t request, uint32_t *response, uint32_t timeout_ms);
 
+/* Line diagnostics: edges seen on the master RX pin since boot, and whether
+ * the pin is at the ACTIVE level (boiler drawing "high" current) right now. */
+uint32_t ot_port_rx_edges(void);
+bool     ot_port_rx_active(void);
+
 /*
  * Slave emulator on the SAME pads (internal loopback, no wiring): it listens on
  * the master's TX pad and answers on the master's RX pad. Both pads become
@@ -120,7 +125,9 @@ typedef int (*lan_cli_exec_cb_t)(const char *line);
 void lan_debug_set_handlers(lan_log_read_cb_t log_cb, lan_cli_exec_cb_t cli_cb);
 
 /* Firmware update written as it arrives (fw_port.c), e.g. from ThingsBoard.
- * begin: image size and checksum algorithm (SHA256, SHA384, SHA512, MD5);
+ * begin: package size and checksum algorithm (SHA256, SHA384, SHA512, MD5);
+ * the package is the image itself or the image zlib-compressed (unpacked on
+ * the way, told apart by the first byte); the checksum covers the package.
  * finish: OT_PORT_INVALID on a checksum mismatch, OT_PORT_ERR if the image is
  * bad; on OT_PORT_OK it boots next (restart to run it). */
 int  fw_port_begin(uint32_t size, const char *checksum_alg);

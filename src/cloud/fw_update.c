@@ -9,11 +9,13 @@
  * metered link must not loop on a broken image). Downloads that fail are
  * retried at most FW_MAX_TRIES times per version.
  *
- * Some links freeze a TCP connection after a few kilobytes from the server
- * (seen on a home ISP towards ThingsBoard Cloud: one chunk, then silence until
- * the keepalive gives up a minute later). So chunks are small, a lost one is
- * asked again after RETRY_MS, and with no answer by STUCK_MS the connection is
- * dropped and made anew; the download resumes at the same chunk.
+ * The link is metered (a SIM card), so the package should be compressed (see
+ * fw_port.h), chunks are large (fewer requests and acknowledgements per byte),
+ * they come with QoS 0 (no PUBACK each; a lost chunk is asked again after
+ * RETRY_MS) and with no answer by STUCK_MS the connection is made anew; the
+ * download resumes at the same chunk. Time offline does not count towards
+ * STALL_MS: when the link comes back (say the SIM is topped up) the download
+ * goes on instead of starting over.
  *
  * A package older than the running firmware is not installed: a build put on
  * the board over the LAN stays there until a newer package is assigned. To go
@@ -42,10 +44,10 @@
 #define TOPIC_REQ     "v2/fw/request/"
 #define TOPIC_RESP    "v2/fw/response/"
 #define KV_FW         "fw_try"
-#define CHUNK         1024   /* small: more of it gets through a link that freezes */
-#define RETRY_MS      4000   /* no chunk for this long: ask again */
-#define STUCK_MS      8000   /* still nothing: reconnect */
-#define STALL_MS      600000 /* no progress for this long: give up */
+#define CHUNK         8192   /* fits the MQTT receive buffer (net_port.c) */
+#define RETRY_MS      10000  /* no chunk for this long: ask again (a repeat costs a whole chunk) */
+#define STUCK_MS      25000  /* still nothing: reconnect */
+#define STALL_MS      600000 /* no progress for this long while online: give up */
 #define RESTART_MS    3000   /* let the last telemetry go out */
 #define FW_MAX_TRIES  3
 
@@ -294,7 +296,7 @@ void fw_update_init(void)
 
 bool fw_update_on_connect(void)
 {
-    mqtt_port_subscribe(TOPIC_RESP "+/chunk/+", 1);
+    mqtt_port_subscribe(TOPIC_RESP "+/chunk/+", 0);
     tal_mutex_lock(s_lock);
     s_conn_ms = tal_system_get_millisecond();
     bool busy = s_phase == FW_DOWNLOADING;
@@ -368,7 +370,7 @@ bool fw_update_on_message(const char *topic, int topic_len, const char *data, in
         if (data_len <= 0 || s_got + (uint32_t)data_len > s_target.size) {
             fail("server sent an unexpected chunk size");
         } else if (fw_port_write(data, (size_t)data_len) != OT_PORT_OK) {
-            fail("flash write failed");
+            fail("write failed (flash, or bad compressed data)");
         } else {
             s_got += (uint32_t)data_len;
             s_chunk++;
@@ -405,7 +407,9 @@ void fw_update_tick(void)
     /* read the clock under the lock: the MQTT task may have just started a
      * download and stamped it while this task waited */
     uint32_t now = tal_system_get_millisecond();
-    if (s_phase == FW_DOWNLOADING) {
+    if (s_phase == FW_DOWNLOADING && !mqtt_port_connected()) {
+        s_moved_ms = now; /* offline time does not count as a stall */
+    } else if (s_phase == FW_DOWNLOADING) {
         /* waiting since the last chunk or, if later, since this connection came up */
         int32_t idle = since(now, s_moved_ms) < since(now, s_conn_ms) ? since(now, s_moved_ms)
                                                                        : since(now, s_conn_ms);

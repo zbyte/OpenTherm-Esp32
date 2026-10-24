@@ -145,7 +145,7 @@ int mqtt_port_start(const mqtt_port_cfg_t *cfg)
         .session.message_retransmit_timeout    = 10000, /* default 1 s floods a slow link */
         .network.reconnect_timeout_ms          = cfg->reconnect_ms,
         .network.timeout_ms                    = 20000,
-        .buffer.size                           = 2048 + 512, /* a firmware chunk in one piece */
+        .buffer.size                           = 8192 + 512, /* a firmware chunk (fw_update.c) in one piece */
         .buffer.out_size                       = 2048,
         .task.stack_size                       = 8192,
     };

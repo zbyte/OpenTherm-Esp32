@@ -25,14 +25,21 @@ start_type automatic
 restart_timeout 5 60
 keepalive_interval 60
 
+# QoS 0 on the bridge, everywhere. With QoS 1, Mosquitto 2.0.20 lost track of
+# its unacknowledged messages after the bridge reconnected (2026-10-12): the
+# in-flight window stayed full, QoS 1 messages piled up until "Outgoing
+# messages are being dropped for client local.opentherm-bridge", and for two
+# days only QoS 0 got through. Server to ThingsBoard is a stable link; the
+# board keeps QoS 1 towards this broker, sends all telemetry every 10 minutes
+# and asks for the shared attributes on each connect.
 # board -> ThingsBoard
-topic v1/devices/me/telemetry out 1
-topic v1/devices/me/attributes/request/+ out 1
-topic v1/devices/me/rpc/response/+ out 1
+topic v1/devices/me/telemetry out 0
+topic v1/devices/me/attributes/request/+ out 0
+topic v1/devices/me/rpc/response/+ out 0
 topic v2/fw/request/+/chunk/+ out 0
 # ThingsBoard -> board
-topic v1/devices/me/attributes/response/+ in 1
-topic v1/devices/me/rpc/request/+ in 1
-topic v2/fw/response/+/chunk/+ in 1
+topic v1/devices/me/attributes/response/+ in 0
+topic v1/devices/me/rpc/request/+ in 0
+topic v2/fw/response/+/chunk/+ in 0
 # both: client attributes go out, shared attribute changes come in
-topic v1/devices/me/attributes both 1
+topic v1/devices/me/attributes both 0

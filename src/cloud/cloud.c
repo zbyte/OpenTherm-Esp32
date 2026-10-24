@@ -38,6 +38,7 @@
 #include "fw_update.h"
 #include "log_ring.h"
 #include "net.h"
+#include "ot_frame.h"
 #include "ot_port.h"
 #include "regulator.h"
 #include "sensors.h"
@@ -361,7 +362,7 @@ typedef struct {
 
 enum {
     K_ROOM, K_TARGET, K_FLOW_SET, K_FLOW, K_MOD, K_STATE, K_DEMAND, K_FLAME, K_FAULTS, K_OT_OK, K_OEM,
-    K_BFAULT, K_BERR,
+    K_BFAULT, K_BERR, K_CH_ACT, K_DHW_ACT, K_DHW, K_ROOM_OT, K_OT_TMO, K_OT_FRAMING, K_OT_PARITY, K_OT_ECHO,
     K_T1, K_T2, K_TBOARD, K_PRESSURE, K_POWER, K_ENERGY, K_RSSI, K_COUNT
 };
 
@@ -373,6 +374,10 @@ static const tele_def_t s_tele[K_COUNT] = {
     [K_FAULTS] = {"faults", T_INT, 1},      [K_OT_OK] = {"ot_ok", T_BOOL, 1},
     [K_OEM] = {"oem_fault", T_INT, 1},      [K_T1] = {"t1", T_X10, 2},
     [K_BFAULT] = {"boiler_fault", T_BOOL, 1}, [K_BERR] = {"boiler_error", T_BERR, 1},
+    [K_CH_ACT] = {"ch_active", T_BOOL, 1},  [K_DHW_ACT] = {"dhw_active", T_BOOL, 1},
+    [K_DHW] = {"dhw", T_BOOL, 1},           [K_ROOM_OT] = {"room_ot", T_BOOL, 1},
+    [K_OT_TMO] = {"ot_timeouts", T_INT, 1}, [K_OT_FRAMING] = {"ot_framing", T_INT, 1},
+    [K_OT_PARITY] = {"ot_parity", T_INT, 1}, [K_OT_ECHO] = {"ot_echo", T_INT, 1},
     [K_T2] = {"t2", T_X10, 2},              [K_TBOARD] = {"t_board", T_X10, 2},
     [K_PRESSURE] = {"pressure", T_INT, 1},  [K_POWER] = {"power", T_INT, 100},
     [K_ENERGY] = {"energy", T_X100, 1},     [K_RSSI] = {"rssi", T_INT, 6},
@@ -387,6 +392,7 @@ static tval_t   s_sent[K_COUNT];
 static bool     s_sent_ok[K_COUNT];
 static uint32_t s_last_full, s_last_check, s_energy_ms, s_clock_ms;
 static bool     s_clock_sent;
+static uint32_t s_bad_seq_sent;
 
 static void collect(tval_t *t)
 {
@@ -410,6 +416,17 @@ static void collect(tval_t *t)
     /* without a link the fault state is unknown: no fault, text says so */
     t[K_BFAULT] = (tval_t){true, b.comm_ok && b.fault};
     t[K_BERR]   = (tval_t){true, !b.comm_ok ? -1 : b.fault ? (int32_t)((b.asf_flags << 8) | b.oem_fault) | 0x10000 : 0};
+    /* what the boiler reports it is doing: heating circuit or hot water tank */
+    t[K_CH_ACT]  = (tval_t){b.comm_ok, b.ch_active};
+    t[K_DHW_ACT] = (tval_t){b.comm_ok, b.dhw_active};
+    t[K_DHW]     = (tval_t){true, b.dhw_enable_cmd};
+    t[K_ROOM_OT] = (tval_t){b.comm_ok && b.room_sensor && b.room_valid, b.room_ok};
+    boiler_bus_stats_t bs;
+    boiler_get_bus_stats(&bs);
+    t[K_OT_TMO]     = (tval_t){true, (int32_t)bs.timeouts};
+    t[K_OT_FRAMING] = (tval_t){true, (int32_t)bs.framing};
+    t[K_OT_PARITY]  = (tval_t){true, (int32_t)bs.parity};
+    t[K_OT_ECHO]    = (tval_t){true, (int32_t)bs.echo};
     for (uint8_t i = 0; i < 3; i++) {
         int16_t v;
         t[K_T1 + i].valid = sensors_get(i, &v);
@@ -484,6 +501,8 @@ static void send_telemetry(bool force)
         s_last_full = now;
     }
     collect(cur);
+    /* local time as the board sees it, and minutes since the last NTP answer */
+    bool clock_due = full || !s_clock_sent || now - s_clock_ms >= CLOCK_MS;
 
     jout_t o = {.buf = buf, .cap = sizeof(buf)};
     jput(&o, "{");
@@ -498,13 +517,24 @@ static void send_telemetry(bool force)
             /* the counter creeps up while heating: at most once a minute */
             due = due && now - s_energy_ms >= ENERGY_MIN_MS;
         }
+        if (k == K_RSSI || (k >= K_OT_TMO && k <= K_OT_ECHO)) {
+            /* rssi jumps between two levels on some routers (-42/-50), line error
+             * counters may climb every second: only with the clock, once a minute */
+            due = due && clock_due;
+        }
         if (due) {
             jtele(&o, k, cur[k].v);
             sent[n++] = (uint8_t)k;
         }
     }
-    /* local time as the board sees it, and minutes since the last NTP answer */
-    bool clock_due = full || !s_clock_sent || now - s_clock_ms >= CLOCK_MS;
+    boiler_bus_stats_t bs;
+    boiler_get_bus_stats(&bs);
+    bool bad_due = clock_due && bs.bad_seq != s_bad_seq_sent;
+    if (bad_due) {
+        /* the last corrupted exchange; the server timestamp dates it to the minute */
+        jkey(&o, "ot_last_bad");
+        jstr(&o, bs.last_bad);
+    }
     if (clock_due) {
         char     t[24];
         uint32_t age;
@@ -524,6 +554,9 @@ static void send_telemetry(bool force)
             s_clock_ms   = now;
             s_clock_sent = true;
         }
+        if (bad_due) {
+            s_bad_seq_sent = bs.bad_seq;
+        }
         for (int i = 0; i < n; i++) {
             s_sent[sent[i]]    = cur[sent[i]];
             s_sent_ok[sent[i]] = true;
@@ -532,6 +565,53 @@ static void send_telemetry(bool force)
             }
         }
     }
+}
+
+/* ------------------------------------------- raw OpenTherm from the cloud */
+
+/* Shared attribute ot_cmd: "r 3; w 1 4100" (as CLI ot raw: r|w|0|1, id,
+ * hex value), run once per push; the answers go out as telemetry ot_reply. */
+static char s_ot_cmd[160];
+static bool s_ot_cmd_due;
+
+static void ot_cmd_run(void)
+{
+    static char buf[512];
+    char        reply[400] = "";
+    int         n          = 0;
+    char       *save       = NULL;
+    for (char *c = strtok_r(s_ot_cmd, ";", &save); c && n < (int)sizeof(reply) - 48;
+         c = strtok_r(NULL, ";", &save)) {
+        char     t     = 0;
+        unsigned id    = 0, val = 0;
+        int      got   = sscanf(c, " %c %u %x", &t, &id, &val);
+        bool     write = t == 'w' || t == 'W' || t == '1';
+        if (got < 2 || id > 255 || val > 0xFFFF || !(write || t == 'r' || t == 'R' || t == '0')) {
+            n += snprintf(reply + n, sizeof(reply) - n, "%sbad: %.20s", n ? "; " : "", c);
+            continue;
+        }
+        if (id == OT_ID_MAX_REL_MOD) {
+            /* BAXI Ampera: touching ID14 left its power limit (menu 5.0) at 0 kW, the boiler stopped */
+            n += snprintf(reply + n, sizeof(reply) - n, "%sR/W%u blocked", n ? "; " : "", id);
+            continue;
+        }
+        uint32_t resp = 0;
+        int      rc   = boiler_raw(write ? OT_WRITE_DATA : OT_READ_DATA, (uint8_t)id, (uint16_t)val, &resp);
+        n += snprintf(reply + n, sizeof(reply) - n, "%s%c%u %04x>", n ? "; " : "", write ? 'W' : 'R', id, val);
+        if (rc == OT_PORT_OK) {
+            n += snprintf(reply + n, sizeof(reply) - n, "%s %04x", ot_msg_type_str(ot_frame_type(resp)),
+                          ot_frame_value(resp));
+        } else {
+            n += snprintf(reply + n, sizeof(reply) - n, "rc=%d", rc);
+        }
+    }
+    PR_NOTICE("cloud: ot_cmd %s", reply);
+    jout_t o = {.buf = buf, .cap = sizeof(buf)};
+    jput(&o, "{");
+    jkey(&o, "ot_reply");
+    jstr(&o, reply);
+    jput(&o, "}");
+    mqtt_port_publish(TOPIC_TELE, buf, (int)o.len, 1);
 }
 
 static void send_attributes(uint32_t fields, bool info)
@@ -760,7 +840,7 @@ static void rpc_dispatch(const char *method, const cJSON *p, jout_t *o)
 static const char *const s_shared_keys[] = {
     "set_heating",   "set_mode",      "set_temp",      "set_boiler",    "set_lower",     "set_upper",
     "set_sensor",    "set_tz",        "set_schedule",  "set_sched_all", "set_sched_mon", "set_sched_tue",
-    "set_sched_wed", "set_sched_thu", "set_sched_fri", "set_sched_sat", "set_sched_sun"};
+    "set_sched_wed", "set_sched_thu", "set_sched_fri", "set_sched_sat", "set_sched_sun", "set_dhw", "set_ot_room"};
 
 static cJSON *s_seen; /* {"set_temp":21.5,...}, client task only */
 
@@ -819,6 +899,14 @@ static bool shared_apply(const char *key, const cJSON *v)
         i = cJSON_IsNumber(v) ? v->valueint - 1 : index_of(s_sensors, 6, v);
         return i >= 0 && i <= SENSOR_SEL_AVG && settings_set_control_sensor((uint8_t)i, SRC);
     }
+    if (!strcmp(key, "set_ot_room") && cJSON_IsNumber(v) && v->valueint >= 0 && v->valueint <= SENSOR_SLOTS) {
+        boiler_set_room_sensor((uint8_t)v->valueint);
+        return true;
+    }
+    if (!strcmp(key, "set_dhw") && parse_bool(v, &b)) {
+        boiler_set_dhw(b);
+        return true;
+    }
     if (!strcmp(key, "set_tz") && cJSON_IsNumber(v)) {
         return settings_set_tz((int16_t)v->valueint, SRC);
     }
@@ -865,8 +953,9 @@ static void shared_handle(const cJSON *obj, bool fresh)
             continue;
         }
         const cJSON *old = cJSON_GetObjectItem(s_seen, key);
-        if (!fresh && old && cJSON_Compare(old, v, true)) {
-            continue; /* already applied; a local change since then wins */
+        if (!fresh && old && cJSON_Compare(old, v, true) && strcmp(key, "set_dhw") &&
+            strcmp(key, "set_ot_room")) {
+            continue; /* already applied; a local change since then wins (set_dhw, set_ot_room are not stored) */
         }
         bool ok = shared_apply(key, v);
         PR_NOTICE("cloud: shared %s %s", key, ok ? "applied" : "REJECTED");
@@ -889,7 +978,12 @@ static void on_message(const char *topic, int topic_len, const char *data, int d
         return;
     }
     if (topic_len == (int)strlen(TOPIC_ATTR) && !strncmp(topic, TOPIC_ATTR, (size_t)topic_len)) {
-        cJSON *obj = cJSON_ParseWithLength(data, (size_t)data_len);
+        cJSON       *obj = cJSON_ParseWithLength(data, (size_t)data_len);
+        const cJSON *cmd = cJSON_GetObjectItem(obj, "ot_cmd");
+        if (cJSON_IsString(cmd) && !__atomic_load_n(&s_ot_cmd_due, __ATOMIC_ACQUIRE)) {
+            snprintf(s_ot_cmd, sizeof(s_ot_cmd), "%s", cmd->valuestring);
+            __atomic_store_n(&s_ot_cmd_due, true, __ATOMIC_RELEASE);
+        }
         shared_handle(obj, true);
         cJSON_Delete(obj);
         return;
@@ -1041,7 +1135,7 @@ void cloud_run(void)
                 static const char req[] =
                     "{\"sharedKeys\":\"set_heating,set_mode,set_temp,set_boiler,set_lower,set_upper,set_sensor,"
                     "set_tz,set_schedule,set_sched_all,set_sched_mon,set_sched_tue,set_sched_wed,set_sched_thu,"
-                    "set_sched_fri,set_sched_sat,set_sched_sun," FW_UPDATE_SHARED_KEYS "\"}";
+                    "set_sched_fri,set_sched_sat,set_sched_sun,set_dhw,set_ot_room," FW_UPDATE_SHARED_KEYS "\"}";
                 mqtt_port_publish(TOPIC_AREQ, req, (int)strlen(req), 1);
             }
             __atomic_fetch_and(&s_pending_settings, 0, __ATOMIC_SEQ_CST);
@@ -1058,6 +1152,10 @@ void cloud_run(void)
             if (r || now - s_last_check >= TELE_CHECK_MS) {
                 s_last_check = now;
                 send_telemetry(false);
+            }
+            if (__atomic_load_n(&s_ot_cmd_due, __ATOMIC_ACQUIRE)) {
+                ot_cmd_run();
+                __atomic_store_n(&s_ot_cmd_due, false, __ATOMIC_RELEASE);
             }
         }
         fw_update_tick();
