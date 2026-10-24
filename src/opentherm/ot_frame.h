@@ -34,7 +34,9 @@ enum {
     OT_ID_MAX_REL_MOD   = 14, /* max relative modulation, f8.8 % */
     OT_ID_TROOM         = 24, /* room temperature, f8.8 degC (master writes) */
     OT_ID_REL_MOD       = 17, /* relative modulation level, f8.8 % */
+    OT_ID_CH_PRESSURE   = 18, /* water pressure in the CH circuit, f8.8 bar */
     OT_ID_TBOILER       = 25, /* flow temperature, f8.8 degC */
+    OT_ID_TDHW          = 26, /* DHW (tank) temperature, f8.8 degC */
     OT_ID_TRET          = 28, /* return temperature, f8.8 degC */
     OT_ID_TSET_BOUNDS   = 49, /* HB upper, LB lower bound of max CH setpoint, degC */
     OT_ID_MAX_TSET      = 57, /* max CH setpoint, f8.8 degC */

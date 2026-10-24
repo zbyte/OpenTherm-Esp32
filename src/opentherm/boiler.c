@@ -38,6 +38,13 @@
 #define OT_ROOM_SENSOR 2
 #endif
 
+#ifndef OT_POWER_LIMIT_W
+#define OT_POWER_LIMIT_W 0
+#endif
+#ifndef BOILER_POWER_W
+#define BOILER_POWER_W 18000
+#endif
+
 #define OT_CORE      1
 #define OT_TASK_PRIO 20
 
@@ -53,6 +60,7 @@ static int16_t  s_tset_sent = -1; /* last acknowledged value, -1 = none */
 static uint32_t s_tset_ms;
 static bool     s_ch_sent;
 static int16_t  s_tset_lo_x10, s_tset_hi_x10; /* ID49 bounds, 0 = unknown */
+static int32_t  s_power_sent = -1; /* last ID14 value written, W; -1 = send again */
 
 static int exchange(ot_msg_type_e type, uint8_t id, uint16_t value, uint32_t *resp)
 {
@@ -153,6 +161,8 @@ static void poll_cycle(uint32_t n)
             s_st.flame      = false;
             s_st.ch_active  = false;
             s_st.dhw_active = false;
+            s_st.pressure_valid = false;
+            s_st.dhw_temp_valid = false;
         }
     }
     tal_mutex_unlock(s_lock);
@@ -175,7 +185,31 @@ static void poll_cycle(uint32_t n)
             s_tset_hi_x10 = (int16_t)((int8_t)(b >> 8) * 10);
             s_tset_lo_x10 = (int16_t)((int8_t)b * 10);
         }
-        s_tset_sent = -1; /* the boiler may have restarted: send it again */
+        s_tset_sent  = -1; /* the boiler may have restarted: send it again */
+        s_power_sent = -1;
+    }
+
+    /* BAXI Ampera resets its power limit (menu 5.0, = ID14 max modulation) to
+     * 0 after any break in the link and then never heats: keep it set. */
+    tal_mutex_lock(s_lock);
+    uint32_t pw = s_st.power_limit_w;
+    tal_mutex_unlock(s_lock);
+    if (pw && (int32_t)pw != s_power_sent) {
+        /* whole percent, rounded up: the Ampera drops the fraction and rounds down to its
+         * 3 kW relay steps, so 15 of 18 kW sent as 83.3 % came out as 12 kW */
+        uint32_t pct = pw >= BOILER_POWER_W ? 100u : (uint32_t)(((uint64_t)pw * 100u + BOILER_POWER_W - 1) / BOILER_POWER_W);
+        uint32_t f88 = pct * 256u;
+        rc           = exchange(OT_WRITE_DATA, OT_ID_MAX_REL_MOD, (uint16_t)f88, &resp);
+        bool pok     = rc == OT_PORT_OK && ot_frame_type(resp) == OT_WRITE_ACK;
+        /* a clear refusal is final until the next reconnect; line errors retry next cycle */
+        s_power_sent = rc == OT_PORT_OK ? (int32_t)pw : -1;
+        tal_mutex_lock(s_lock);
+        if (pok != s_st.power_ok) {
+            PR_NOTICE("boiler: power limit %u W (%u.%u %%) %s", (unsigned)pw, (unsigned)(f88 / 256),
+                      (unsigned)((f88 % 256) * 10 / 256), pok ? "accepted" : "NOT accepted");
+            s_st.power_ok = pok;
+        }
+        tal_mutex_unlock(s_lock);
     }
 
     if (s_tset_hi_x10 > 0) {
@@ -233,6 +267,22 @@ static void poll_cycle(uint32_t n)
             s_st.rel_mod_x10 = ot_f88_to_x10((uint16_t)v);
         }
         tal_mutex_unlock(s_lock);
+        break;
+    case 1:
+        /* slow values, each every 20 s; a boiler without the sensor answers DATA_INVALID */
+        if (n % 20 == 1 || n % 20 == 13) {
+            bool    pressure = n % 20 == 1;
+            int32_t r        = read_value(pressure ? OT_ID_CH_PRESSURE : OT_ID_TDHW);
+            tal_mutex_lock(s_lock);
+            if (pressure) {
+                s_st.pressure_valid = r >= 0;
+                s_st.pressure_x100  = r >= 0 ? (int16_t)(((int32_t)(int16_t)r * 100) / 256) : 0;
+            } else {
+                s_st.dhw_temp_valid = r >= 0;
+                s_st.dhw_temp_x10   = r >= 0 ? ot_f88_to_x10((uint16_t)r) : 0;
+            }
+            tal_mutex_unlock(s_lock);
+        }
         break;
     case 2:
         if (fault || n % 20 == 2) {
@@ -296,7 +346,8 @@ void boiler_init(void)
 #if defined(OT_MASTER_DHW_ENABLE_BIT) && OT_MASTER_DHW_ENABLE_BIT
     s_st.dhw_enable_cmd = true;
 #endif
-    s_st.room_sensor = OT_ROOM_SENSOR;
+    s_st.room_sensor   = OT_ROOM_SENSOR;
+    s_st.power_limit_w = OT_POWER_LIMIT_W;
 
     if (ot_port_task_create(boiler_task, "ot_master", 4096, OT_TASK_PRIO, OT_CORE, NULL) != OT_PORT_OK) {
         PR_ERR("boiler: task create failed");
@@ -318,6 +369,17 @@ void boiler_set_dhw(bool on)
         PR_NOTICE("boiler: hot water (DHW) %s", on ? "enabled" : "disabled");
     }
     s_st.dhw_enable_cmd = on;
+    tal_mutex_unlock(s_lock);
+}
+
+void boiler_set_power_limit(uint32_t watts)
+{
+    tal_mutex_lock(s_lock);
+    if (s_st.power_limit_w != watts) {
+        PR_NOTICE("boiler: power limit to the boiler %u W (0 = not sent)", (unsigned)watts);
+        s_st.power_limit_w = watts;
+        s_st.power_ok      = false;
+    }
     tal_mutex_unlock(s_lock);
 }
 

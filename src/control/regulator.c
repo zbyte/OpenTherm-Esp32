@@ -40,8 +40,12 @@
 #define DEMAND_ON   0.2f /* err above -> heat */
 #define DEMAND_OFF -0.3f /* err below -> stop */
 
+#define STALL_GAP_X10 50          /* flow this far below the setpoint ... */
+#define STALL_AFTER_S (10 * 60.0f) /* ... with the boiler idle this long: it does not heat */
+
 static MUTEX_HANDLE          s_lock;
 static regulator_status_t    s_st;
+static float                 s_stall_s; /* step() only */
 static regulator_change_cb_t s_on_change;
 static float                 s_integral;
 
@@ -188,6 +192,20 @@ static void step(float dt_s)
 
     work_state_e ws = b.flame ? WORK_HEATING : (demand ? WORK_WARM : WORK_IDLE);
 
+    /* BAXI Ampera sometimes drops its own power limit (menu 5.0) to 0 or the
+     * pump setting (11.0): it then accepts every command and never heats.
+     * Not readable over OpenTherm, so spot it by what it does. */
+    if (demand && b.comm_ok && b.flow_valid && !b.flame && b.flow_x10 < flow_x10 - STALL_GAP_X10) {
+        s_stall_s += dt_s;
+    } else {
+        s_stall_s = 0;
+    }
+    bool stalled = s_stall_s >= STALL_AFTER_S;
+    if (stalled != prev.stalled) {
+        PR_WARN("regulator: boiler %s (flow %d, flow_set %d)", stalled ? "does not heat on demand" : "heats again",
+                b.flow_x10, flow_x10);
+    }
+
     regulator_status_t now = {
         .time_valid   = time_valid,
         .sensor_ok    = sensor_ok,
@@ -201,6 +219,7 @@ static void step(float dt_s)
         .work_state   = ws,
         .flow_valid   = b.flow_valid,
         .flow_x10     = b.flow_x10,
+        .stalled      = stalled,
     };
 
     tal_mutex_lock(s_lock);
@@ -217,7 +236,7 @@ static void step(float dt_s)
     if (now.flow_valid && (!prev.flow_valid || (now.flow_x10 + 5) / 10 != (prev.flow_x10 + 5) / 10)) {
         changed |= REG_F_FLOW;
     }
-    if (now.faults != prev.faults) {
+    if (now.faults != prev.faults || now.stalled != prev.stalled) {
         changed |= REG_F_FAULTS;
         PR_WARN("regulator: faults 0x%x (sensor=%d boiler_comm=%d boiler_fault=%d oem=%u)", faults, sensor_ok,
                 b.comm_ok, b.fault, b.oem_fault);

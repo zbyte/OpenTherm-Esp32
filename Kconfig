@@ -106,6 +106,17 @@ config BOILER_POWER_W
     int "Boiler rated power, W (for the energy estimate)"
     default 18000
 
+config OT_POWER_LIMIT_W
+    int "Power limit sent to the boiler as max modulation (ID14), W; 0 = not sent"
+    range 0 100000
+    default 15000
+    ---help---
+        BAXI Ampera: ID14 is its power limit (menu 5.0, percent of the rated
+        power). The boiler drops it to 0 whenever the link to the thermostat
+        breaks or the board restarts, and then never heats; the board sends
+        it on every (re)connect and every 10 minutes. Changed at run time
+        with ot power / set_max_power.
+
 config HEAT_FLOW_MIN_X10
     int "Minimum flow setpoint while heating, 0.1 degC"
     default 250

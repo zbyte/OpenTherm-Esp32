@@ -34,6 +34,7 @@ typedef struct {
     work_state_e work_state;
     bool         flow_valid;
     int16_t      flow_x10; /* measured boiler flow temperature */
+    bool         stalled;  /* heat demanded, flow well below the setpoint, boiler idle for long */
 } regulator_status_t;
 
 /* fields for the change callback */

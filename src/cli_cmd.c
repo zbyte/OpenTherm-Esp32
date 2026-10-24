@@ -243,6 +243,11 @@ static void cmd_ot(int argc, char *argv[])
                   (unsigned)s.echo, s.last_bad[0] ? s.last_bad : "-");
         return;
     }
+    if (argc == 3 && !strcmp(argv[1], "power")) {
+        /* kW, 0 = do not send ID14 */
+        boiler_set_power_limit((uint32_t)(atof(argv[2]) * 1000.0));
+        return;
+    }
     if (argc == 3 && !strcmp(argv[1], "room")) {
         int slot = atoi(argv[2]);
         boiler_set_room_sensor(slot >= 0 && slot <= SENSOR_SLOTS ? (uint8_t)slot : 0);
@@ -272,7 +277,7 @@ static void cmd_ot(int argc, char *argv[])
                   ot_frame_id(resp), ot_frame_value(resp));
         return;
     }
-    PR_INFO("usage: ot log <on|off> | ot stats | ot dhw <on|off> | ot room <0-4> | ot line | ot raw <type 0=read 1=write> <id> <hex value>");
+    PR_INFO("usage: ot log <on|off> | ot stats | ot dhw <on|off> | ot room <0-4> | ot power <kW> | ot line | ot raw <type 0=read 1=write> <id> <hex value>");
 }
 
 static void cmd_sim(int argc, char *argv[])

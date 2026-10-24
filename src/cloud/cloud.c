@@ -362,7 +362,7 @@ typedef struct {
 
 enum {
     K_ROOM, K_TARGET, K_FLOW_SET, K_FLOW, K_MOD, K_STATE, K_DEMAND, K_FLAME, K_FAULTS, K_OT_OK, K_OEM,
-    K_BFAULT, K_BERR, K_CH_ACT, K_DHW_ACT, K_DHW, K_ROOM_OT, K_OT_TMO, K_OT_FRAMING, K_OT_PARITY, K_OT_ECHO,
+    K_BFAULT, K_BERR, K_CH_ACT, K_DHW_ACT, K_DHW, K_ROOM_OT, K_CH_PRESS, K_DHW_TEMP, K_STALLED, K_MAX_POWER, K_OT_TMO, K_OT_FRAMING, K_OT_PARITY, K_OT_ECHO,
     K_T1, K_T2, K_TBOARD, K_PRESSURE, K_POWER, K_ENERGY, K_RSSI, K_COUNT
 };
 
@@ -376,6 +376,8 @@ static const tele_def_t s_tele[K_COUNT] = {
     [K_BFAULT] = {"boiler_fault", T_BOOL, 1}, [K_BERR] = {"boiler_error", T_BERR, 1},
     [K_CH_ACT] = {"ch_active", T_BOOL, 1},  [K_DHW_ACT] = {"dhw_active", T_BOOL, 1},
     [K_DHW] = {"dhw", T_BOOL, 1},           [K_ROOM_OT] = {"room_ot", T_BOOL, 1},
+    [K_CH_PRESS] = {"ch_pressure", T_X100, 5}, [K_DHW_TEMP] = {"dhw_temp", T_X10, 5},
+    [K_STALLED] = {"boiler_stalled", T_BOOL, 1}, [K_MAX_POWER] = {"max_power", T_X10, 1},
     [K_OT_TMO] = {"ot_timeouts", T_INT, 1}, [K_OT_FRAMING] = {"ot_framing", T_INT, 1},
     [K_OT_PARITY] = {"ot_parity", T_INT, 1}, [K_OT_ECHO] = {"ot_echo", T_INT, 1},
     [K_T2] = {"t2", T_X10, 2},              [K_TBOARD] = {"t_board", T_X10, 2},
@@ -421,6 +423,11 @@ static void collect(tval_t *t)
     t[K_DHW_ACT] = (tval_t){b.comm_ok, b.dhw_active};
     t[K_DHW]     = (tval_t){true, b.dhw_enable_cmd};
     t[K_ROOM_OT] = (tval_t){b.comm_ok && b.room_sensor && b.room_valid, b.room_ok};
+    t[K_CH_PRESS]  = (tval_t){b.pressure_valid, b.pressure_x100};
+    t[K_DHW_TEMP]  = (tval_t){b.dhw_temp_valid, b.dhw_temp_x10};
+    t[K_STALLED]   = (tval_t){true, r.stalled};
+    /* kW the boiler accepted as its power limit (ID14); no key while not sent or refused */
+    t[K_MAX_POWER] = (tval_t){b.comm_ok && b.power_limit_w && b.power_ok, (int32_t)(b.power_limit_w / 100)};
     boiler_bus_stats_t bs;
     boiler_get_bus_stats(&bs);
     t[K_OT_TMO]     = (tval_t){true, (int32_t)bs.timeouts};
@@ -590,9 +597,10 @@ static void ot_cmd_run(void)
             n += snprintf(reply + n, sizeof(reply) - n, "%sbad: %.20s", n ? "; " : "", c);
             continue;
         }
-        if (id == OT_ID_MAX_REL_MOD) {
-            /* BAXI Ampera: touching ID14 left its power limit (menu 5.0) at 0 kW, the boiler stopped */
-            n += snprintf(reply + n, sizeof(reply) - n, "%sR/W%u blocked", n ? "; " : "", id);
+        if (write && got < 3) {
+            /* a write needs an explicit value: a forgotten one would write 0, and on BAXI Ampera
+             * ID14 (max modulation) is likely its power limit (menu 5.0) */
+            n += snprintf(reply + n, sizeof(reply) - n, "%sW%u: no value", n ? "; " : "", id);
             continue;
         }
         uint32_t resp = 0;
@@ -840,7 +848,7 @@ static void rpc_dispatch(const char *method, const cJSON *p, jout_t *o)
 static const char *const s_shared_keys[] = {
     "set_heating",   "set_mode",      "set_temp",      "set_boiler",    "set_lower",     "set_upper",
     "set_sensor",    "set_tz",        "set_schedule",  "set_sched_all", "set_sched_mon", "set_sched_tue",
-    "set_sched_wed", "set_sched_thu", "set_sched_fri", "set_sched_sat", "set_sched_sun", "set_dhw", "set_ot_room"};
+    "set_sched_wed", "set_sched_thu", "set_sched_fri", "set_sched_sat", "set_sched_sun", "set_dhw", "set_ot_room", "set_max_power"};
 
 static cJSON *s_seen; /* {"set_temp":21.5,...}, client task only */
 
@@ -899,6 +907,14 @@ static bool shared_apply(const char *key, const cJSON *v)
         i = cJSON_IsNumber(v) ? v->valueint - 1 : index_of(s_sensors, 6, v);
         return i >= 0 && i <= SENSOR_SEL_AVG && settings_set_control_sensor((uint8_t)i, SRC);
     }
+    if (!strcmp(key, "set_max_power") && (cJSON_IsNumber(v) || cJSON_IsString(v))) {
+        int16_t kw_x10 = num_x10(v);
+        if (kw_x10 < 0 || kw_x10 > 1000) {
+            return false;
+        }
+        boiler_set_power_limit((uint32_t)kw_x10 * 100u);
+        return true;
+    }
     if (!strcmp(key, "set_ot_room") && cJSON_IsNumber(v) && v->valueint >= 0 && v->valueint <= SENSOR_SLOTS) {
         boiler_set_room_sensor((uint8_t)v->valueint);
         return true;
@@ -954,8 +970,10 @@ static void shared_handle(const cJSON *obj, bool fresh)
         }
         const cJSON *old = cJSON_GetObjectItem(s_seen, key);
         if (!fresh && old && cJSON_Compare(old, v, true) && strcmp(key, "set_dhw") &&
-            strcmp(key, "set_ot_room")) {
-            continue; /* already applied; a local change since then wins (set_dhw, set_ot_room are not stored) */
+            strcmp(key, "set_ot_room") && strcmp(key, "set_max_power")) {
+            /* already applied; a local change since then wins (set_dhw, set_ot_room and
+             * set_max_power are not stored, so they are applied on every connect) */
+            continue;
         }
         bool ok = shared_apply(key, v);
         PR_NOTICE("cloud: shared %s %s", key, ok ? "applied" : "REJECTED");
@@ -1135,7 +1153,7 @@ void cloud_run(void)
                 static const char req[] =
                     "{\"sharedKeys\":\"set_heating,set_mode,set_temp,set_boiler,set_lower,set_upper,set_sensor,"
                     "set_tz,set_schedule,set_sched_all,set_sched_mon,set_sched_tue,set_sched_wed,set_sched_thu,"
-                    "set_sched_fri,set_sched_sat,set_sched_sun,set_dhw,set_ot_room," FW_UPDATE_SHARED_KEYS "\"}";
+                    "set_sched_fri,set_sched_sat,set_sched_sun,set_dhw,set_ot_room,set_max_power," FW_UPDATE_SHARED_KEYS "\"}";
                 mqtt_port_publish(TOPIC_AREQ, req, (int)strlen(req), 1);
             }
             __atomic_fetch_and(&s_pending_settings, 0, __ATOMIC_SEQ_CST);
