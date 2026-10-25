@@ -2,7 +2,7 @@
  * @file regulator.c
  * @brief Heating control: boiler flow setpoint from the mode.
  *
- * auto   -> weekly program points are boiler FLOW setpoints (< 20 degC = off)
+ * auto   -> weekly program points are boiler FLOW setpoints (<= 30 degC = off)
  * manual -> boiler_set (flow setpoint set by hand)
  * home   -> room held at temp_set, PI -> flow setpoint
  * leave  -> room held at the away temperature, PI -> flow setpoint
@@ -67,8 +67,9 @@ static int16_t room_target(const settings_t *cfg, const char **src)
 /*
  * Flow-driven modes (user's choice): the value IS the boiler flow setpoint.
  *   manual -> boiler_set
- *   auto   -> the current weekly-program point; a point below 20 degC means
- *             "boiler off" for that period; unknown time -> boiler_set
+ *   auto   -> the current weekly-program point; a point of SCHED_OFF_MAX_X10
+ *             (30 degC) or below means "boiler off" for that period;
+ *             unknown time -> boiler_set
  * Returns false for room-regulated modes. *flow_x10 == 0 means off.
  */
 static bool flow_setpoint(const settings_t *cfg, bool time_valid, int16_t *flow_x10, const char **src)
@@ -93,7 +94,7 @@ static bool flow_setpoint(const settings_t *cfg, bool time_valid, int16_t *flow_
         *src      = "boiler setpoint (time unknown)";
         return true;
     }
-    if (v < BOILER_SET_MIN_X10) {
+    if (v <= SCHED_OFF_MAX_X10) {
         *flow_x10 = 0;
         *src      = "schedule: boiler off";
     } else {

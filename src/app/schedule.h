@@ -4,7 +4,7 @@
  *
  * 7 days (Monday first) x 4 switch points x 4 bytes:
  * hour, minute, temperature (big-endian, 0.1 degC). The temperature is the
- * boiler FLOW setpoint (below 20 degC = boiler off) and holds until the next
+ * boiler FLOW setpoint (30 degC or below = boiler off) and holds until the next
  * point, across midnight. Stored as is in the settings (Sunday = day 7).
  */
 
@@ -18,6 +18,10 @@
 #define SCHED_DAYS   7
 #define SCHED_POINTS 4
 #define SCHED_BYTES  (SCHED_DAYS * SCHED_POINTS * 4)
+
+/* BAXI Ampera treats any flow setpoint only as "heat" and holds its own panel
+ * temperature, so a low point has to switch the boiler off instead. */
+#define SCHED_OFF_MAX_X10 300
 
 void schedule_default(uint8_t *s);
 bool schedule_validate(const uint8_t *s, size_t len);

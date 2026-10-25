@@ -5,8 +5,8 @@
 
 #include "schedule.h"
 
-/* Points are boiler flow setpoints (user's choice); values below 20 degC mean
- * "boiler off" for that period, so 0..80 degC is accepted. */
+/* Points are boiler flow setpoints (user's choice); values of 30 degC or below
+ * mean "boiler off" for that period, so 0..80 degC is accepted. */
 #define TEMP_MIN_X10 0
 #define TEMP_MAX_X10 800
 

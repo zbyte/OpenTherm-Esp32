@@ -207,7 +207,7 @@ size_t web_page(char *buf, size_t cap)
             "<button type=submit>Сохранить настройки</button></form>");
 
     /* schedule form */
-    put(&o, "<h3>Расписание (уставки подачи; ниже 20 °C — котёл выключен)</h3>"
+    put(&o, "<h3>Расписание (уставки подачи; 30 °C и ниже — котёл выключен)</h3>"
             "<form method=post action=/set><table>");
     for (uint8_t d = 0; d < SCHED_DAYS; d++) {
         put(&o, "<tr><td>%s%s</td><td>", s_day_ru[d], tv && d == wd ? " (сегодня)" : "");
